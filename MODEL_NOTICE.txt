@@ -1,0 +1,26 @@
+Model: MobileNetV2 plant-disease classifier, 38 PlantVillage classes
+ONNX artifact: model.onnx
+Class mapping: plant_disease_labels.txt
+Source checkpoint: https://huggingface.co/Daksh159/plant-disease-mobilenetv2
+Source checkpoint SHA-256: 26c97b05ef2caf58bce6f901c725926546a887ee50f0a637a363b644ec17f96e
+License declared by the model publisher: Apache-2.0; see ONNX_MODEL_LICENSE.txt
+
+The source model card reports 95% validation accuracy; this result is not independently verified.
+The checkpoint repository does not include its referenced class_names.json. The supplied labels use
+the standard alphabetic PlantVillage ImageFolder class order and should be checked against the
+original training class map before relying on class-specific decisions.
+
+The app only allows predictions for maize, potato, and tomato. This is a screening aid trained on
+PlantVillage-style images, not a substitute for field validation or an agricultural expert.
+The visual discoloration percentage is a rough color heuristic, not measured disease severity.
+
+disease_data.py is a multilingual agronomy reference used to show symptoms and management guidance
+for matching diagnoses. It contains no labeled training images and does not add classes to or retrain
+the classifier. Genuine fine-tuning requires licensed, correctly labeled leaf images for each target
+class, a verified class-to-output mapping, and independent field-image validation before deployment.
+
+The app's upload quality preflight uses image dimensions, grayscale Laplacian variance, brightness,
+and contrast heuristics to flag or block severely low-quality images. These thresholds are not a
+trained quality classifier and have not been validated against a labeled field-photo quality set.
+The displayed classifier score and top-class margin are uncertainty indicators, not calibrated
+probabilities of correctness.
