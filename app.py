@@ -585,7 +585,7 @@ TRANSLATIONS = {
         "no_posts_msg": "No community posts yet in {hub}. Be the first farmer to share an update!",
         "diag_title": "🌱 CropGuard AI",
         "diag_subtitle": "Advanced Computer Vision Agritech Assistant (Global Edition)",
-        "tour_btn": "🏹 Start Visual Arrow Tour",
+        "tour_btn": "How to use CropGuard",
         "crop_select_prompt": "Select Target Crop Type (Hub Priority):",
         "crop_select_header": "🌾 Select Crop Context",
         "upload_header": "📥 1.",
@@ -704,7 +704,7 @@ TRANSLATIONS = {
         "no_posts_msg": "Bado hakuna machapisho ya jamii katika {hub}. Kuwa mkulima wa kwanza kushiriki!",
         "diag_title": "🌱 CropGuard AI",
         "diag_subtitle": "Msaidizi wa Juu wa Maono ya Kompyuta wa Kilimo (Toleo la Dunia)",
-        "tour_btn": "🏹 Anzisha Ziara ya Mishale ya Kuona",
+        "tour_btn": "Jinsi ya kutumia CropGuard",
         "crop_select_prompt": "Chagua Aina ya Mmea unaochunguzwa:",
         "crop_select_header": "🌾 Chagua Muktadha wa Mmea",
         "upload_header": "📥 1.",
@@ -823,7 +823,7 @@ TRANSLATIONS = {
         "no_posts_msg": "Aucune publication pour le moment à {hub}. Soyez le premier à partager !",
         "diag_title": "🌱 CropGuard AI",
         "diag_subtitle": "Assistant Agritech Avancé par Vision par Ordinateur (Édition Mondiale)",
-        "tour_btn": "🏹 Lancer la Visite Guidée Visuelle",
+        "tour_btn": "Comment utiliser CropGuard",
         "crop_select_prompt": "Sélectionnez le type de culture cible :",
         "crop_select_header": "🌾 Contexte de la Culture",
         "upload_header": "📥 1.",
@@ -1951,48 +1951,41 @@ def render_tts_audio_controls(text_to_speak, lang_code):
     """
     components.html(js_code, height=65)
 
-def render_visual_arrow_tour(language_code, lang_name, force_start=False):
+def render_guided_tour(lang_name, force_start=False):
     if lang_name == "Kiswahili":
         steps = [
-            {"selector": "#tour-target-hub", "title": "Hatua ya 1: Chagua Eneo la Kilimo", "text": "Mshale unaonyesha hapa. Chagua mji wako wa kilimo au tumia kitufe cha kugundua eneo moja kwa moja."},
-            {"selector": "#tour-target-crop", "title": "Hatua ya 2: Chagua Aina ya Mmea", "text": "Mshale unaashiria hapa. Chagua aina ya mmea unaochunguza kama vile Mahindi au Viazi."},
-            {"selector": "#tour-target-upload", "title": "Hatua ya 3: Pakia Picha ya Jani", "text": "Pakia au piga picha ya jani lenye maambukizi hapa kuanza uchunguzi wa AI."},
-            {"selector": "#tour-target-results", "title": "Hatua ya 4: Matokeo ya Uchunguzi", "text": "Matokeo ya ugonjwa, kiwango cha ukali wa maambukizi, na muhtasari wa sauti vitaonekana hapa."}
+            {"selector": "#tour-target-hub", "title": "Chagua eneo", "text": "Chagua eneo la shamba lako. Unaweza pia kutumia utambuzi wa eneo."},
+            {"selector": "#tour-target-crop", "title": "Chagua zao", "text": "Chagua aina ya zao unalotaka kuchunguza."},
+            {"selector": "#tour-target-upload", "title": "Pakia picha ya jani", "text": "Pakia picha iliyo wazi ya jani, kisha uanze uchunguzi."},
+            {"selector": "#tour-target-results", "title": "Angalia matokeo", "text": "Baada ya uchunguzi, utapata ugonjwa uliotambuliwa na ushauri."}
         ]
     elif lang_name == "French":
         steps = [
-            {"selector": "#tour-target-hub", "title": "Étape 1 : Sélectionnez la Région", "text": "La flèche pointe ici. Choisissez votre région agricole ou utilisez le bouton de détection automatique."},
-            {"selector": "#tour-target-crop", "title": "Étape 2 : Culture Cible", "text": "Sélectionnez ici le type de culture spécifique que vous souhaitez inspecter."},
-            {"selector": "#tour-target-upload", "title": "Étape 3 : Télécharger l'Image", "text": "Téléchargez ou prenez une photo de la feuille affectée ici pour lancer le diagnostic."},
-            {"selector": "#tour-target-results", "title": "Étape 4 : Résultats du Diagnostic", "text": "Le rapport du diagnostic IA, le degré de sévérité et l'analyse audio s'afficheront ici."}
+            {"selector": "#tour-target-hub", "title": "Choisir une région", "text": "Choisissez la région de votre ferme ou utilisez la détection automatique."},
+            {"selector": "#tour-target-crop", "title": "Choisir une culture", "text": "Sélectionnez la culture que vous souhaitez examiner."},
+            {"selector": "#tour-target-upload", "title": "Ajouter une photo", "text": "Ajoutez une photo nette de la feuille, puis lancez l’analyse."},
+            {"selector": "#tour-target-results", "title": "Lire les résultats", "text": "Après l’analyse, vous verrez le diagnostic et des conseils."}
         ]
     else:
         steps = [
-            {"selector": "#tour-target-hub", "title": "Step 1: Agricultural Hub & Location", "text": "The arrow points directly here. Select your home farming town or click 'Auto-Detect GPS' to calibrate automatically."},
-            {"selector": "#tour-target-crop", "title": "Step 2: Target Crop Selector", "text": "Select the specific crop category you are examining (e.g. Maize, Potatoes, or Cocoa)."},
-            {"selector": "#tour-target-upload", "title": "Step 3: Leaf Image Uploader", "text": "Upload or snap a clear photo of the diseased leaf here to initiate the AI diagnostic scan."},
-            {"selector": "#tour-target-results", "title": "Step 4: Diagnostic Results Panel", "text": "Your disease diagnosis, infection severity percentage, and audio summary will render directly in this box."}
+            {"selector": "#tour-target-hub", "title": "Choose your region", "text": "Select your farm region, or use automatic location detection."},
+            {"selector": "#tour-target-crop", "title": "Choose a crop", "text": "Select the crop you want to check."},
+            {"selector": "#tour-target-upload", "title": "Add a leaf photo", "text": "Upload a clear leaf photo, then run the diagnostic."},
+            {"selector": "#tour-target-results", "title": "Review the results", "text": "After analysis, you’ll see the diagnosis and advice here."}
         ]
 
     steps_json = json.dumps(steps)
     force_js = "true" if force_start else "false"
-    cache_buster = time.time()
     tour_labels = {
-        "exit": "Ondoka kwenye ziara" if lang_name == "Kiswahili" else "Quitter la visite" if lang_name == "French" else "Exit tour",
-        "mute": "Nyamazisha sauti" if lang_name == "Kiswahili" else "Couper le son" if lang_name == "French" else "Mute",
-        "unmute": "Washa sauti" if lang_name == "Kiswahili" else "Activer le son" if lang_name == "French" else "Unmute",
-        "pause": "Sitisha" if lang_name == "Kiswahili" else "Pause" if lang_name == "French" else "Pause",
-        "play": "Endelea" if lang_name == "Kiswahili" else "Reprendre" if lang_name == "French" else "Resume",
-        "voice_guide": "Mwongozo wa sauti" if lang_name == "Kiswahili" else "Guide vocal" if lang_name == "French" else "Voice guide",
-        "speaking": "Inazungumza" if lang_name == "Kiswahili" else "Lecture en cours" if lang_name == "French" else "Speaking",
-        "paused": "Imesitishwa" if lang_name == "Kiswahili" else "En pause" if lang_name == "French" else "Paused",
-        "muted": "Sauti imezimwa" if lang_name == "Kiswahili" else "Son coupé" if lang_name == "French" else "Muted",
-        "ready": "Tayari" if lang_name == "Kiswahili" else "Prêt" if lang_name == "French" else "Ready",
-        "unavailable": "Sauti haiwezi kuchezwa kwenye kivinjari hiki" if lang_name == "Kiswahili" else "La lecture vocale n'est pas disponible dans ce navigateur" if lang_name == "French" else "Voice playback is unavailable in this browser",
+        "close": "Funga" if lang_name == "Kiswahili" else "Fermer" if lang_name == "French" else "Close",
+        "back": "Nyuma" if lang_name == "Kiswahili" else "Retour" if lang_name == "French" else "Back",
+        "next": "Endelea" if lang_name == "Kiswahili" else "Suivant" if lang_name == "French" else "Next",
+        "finish": "Maliza" if lang_name == "Kiswahili" else "Terminer" if lang_name == "French" else "Finish",
+        "step": "Hatua" if lang_name == "Kiswahili" else "Étape" if lang_name == "French" else "Step",
+        "of": "ya" if lang_name == "Kiswahili" else "sur" if lang_name == "French" else "of",
     }
 
     tour_html = f"""
-    <!-- Cache Buster: {cache_buster} -->
     <script>
         const steps = {steps_json};
         const isForceStart = {force_js};
@@ -2000,10 +1993,6 @@ def render_visual_arrow_tour(language_code, lang_name, force_start=False):
         let currentStep = 0;
         let lastHighlightedEl = null;
         let lastHighlightedStyle = null;
-        let isMuted = false;
-        let isPaused = false;
-        let isSpeaking = false;
-        let spotlightPanels = [];
 
         function checkAndInitTour() {{
             const parentDoc = window.parent.document;
@@ -2011,158 +2000,62 @@ def render_visual_arrow_tour(language_code, lang_name, force_start=False):
 
             if (isForceStart || !tourSeen) {{
                 parentDoc.defaultView.localStorage.setItem("cropguard_tour_seen", "true");
-                setTimeout(createPointerOverlay, 400);
+                setTimeout(createTourCard, 400);
             }}
         }}
 
-        function createPointerOverlay() {{
+        function createTourCard() {{
             const parentDoc = window.parent.document;
-            
-            const existingOverlay = parentDoc.getElementById("cg-tour-overlay");
-            if (existingOverlay) existingOverlay.remove();
-            const existingArrow = parentDoc.getElementById("cg-tour-arrow");
-            if (existingArrow) existingArrow.remove();
             const existingBox = parentDoc.getElementById("cg-tour-box");
             if (existingBox) existingBox.remove();
-            const existingExitButton = parentDoc.getElementById("cg-tour-exit");
-            if (existingExitButton) existingExitButton.remove();
-            const existingVoiceBar = parentDoc.getElementById("cg-tour-voice-bar");
-            if (existingVoiceBar) existingVoiceBar.remove();
             const existingStyle = parentDoc.getElementById("cg-tour-style");
             if (existingStyle) existingStyle.remove();
-            
             clearHighlighting();
-
-            const overlay = parentDoc.createElement("div");
-            overlay.id = "cg-tour-overlay";
-            overlay.style.position = "fixed";
-            overlay.style.top = "0";
-            overlay.style.left = "0";
-            overlay.style.width = "100vw";
-            overlay.style.height = "100vh";
-            overlay.style.zIndex = "2147483000";
-            overlay.style.pointerEvents = "none";
-
-            spotlightPanels = [];
-            for (let i = 0; i < 4; i++) {{
-                const panel = parentDoc.createElement("div");
-                panel.style.position = "fixed";
-                panel.style.background = "rgba(10, 14, 30, 0.68)";
-                panel.style.backdropFilter = "blur(2px)";
-                panel.style.pointerEvents = "none";
-                overlay.appendChild(panel);
-                spotlightPanels.push(panel);
-            }}
-
-            const arrow = parentDoc.createElement("div");
-            arrow.id = "cg-tour-arrow";
-            arrow.textContent = "➤";
-            arrow.style.position = "fixed";
-            arrow.style.fontSize = "3rem";
-            arrow.style.color = "#7C4DFF";
-            arrow.style.textShadow = "0 0 16px rgba(124, 77, 255, 0.95)";
-            arrow.style.zIndex = "2147483002";
-            arrow.style.transition = "all 0.3s ease-in-out";
-            arrow.style.animation = "cgTourArrowPulse 0.9s ease-in-out infinite alternate";
-            arrow.style.pointerEvents = "none";
-            
-            const exitButton = parentDoc.createElement("button");
-            exitButton.id = "cg-tour-exit";
-            exitButton.innerHTML = `✕ ${{labels.exit}}`;
-            exitButton.setAttribute("aria-label", labels.exit);
-            exitButton.style.position = "fixed";
-            exitButton.style.top = "64px";
-            exitButton.style.right = "16px";
-            exitButton.style.padding = "10px 16px";
-            exitButton.style.border = "2px solid #FFFFFF";
-            exitButton.style.borderRadius = "8px";
-            exitButton.style.backgroundColor = "#D32F2F";
-            exitButton.style.color = "#FFFFFF";
-            exitButton.style.fontSize = "1rem";
-            exitButton.style.fontWeight = "bold";
-            exitButton.style.cursor = "pointer";
-            exitButton.style.zIndex = "2147483004";
-            exitButton.style.pointerEvents = "auto";
-
-            const voiceBar = parentDoc.createElement("div");
-            voiceBar.id = "cg-tour-voice-bar";
-            voiceBar.setAttribute("role", "region");
-            voiceBar.setAttribute("aria-label", labels.voice_guide);
-            voiceBar.style.position = "fixed";
-            voiceBar.style.left = "50%";
-            voiceBar.style.bottom = "18px";
-            voiceBar.style.transform = "translateX(-50%)";
-            voiceBar.style.width = "min(620px, calc(100vw - 32px))";
-            voiceBar.style.boxSizing = "border-box";
-            voiceBar.style.padding = "14px 16px";
-            voiceBar.style.border = "1px solid rgba(124, 77, 255, 0.3)";
-            voiceBar.style.borderRadius = "16px";
-            voiceBar.style.background = "rgba(255, 255, 255, 0.97)";
-            voiceBar.style.boxShadow = "0 14px 48px rgba(0, 0, 0, 0.28)";
-            voiceBar.style.color = "#172033";
-            voiceBar.style.fontFamily = "system-ui, sans-serif";
-            voiceBar.style.zIndex = "2147483001";
-            voiceBar.style.pointerEvents = "auto";
-            voiceBar.innerHTML = `
-                <div style="display:flex; align-items:center; gap:12px;">
-                    <div id="cg-tour-equalizer" aria-hidden="true" style="height:30px; min-width:34px; display:flex; align-items:center; justify-content:center; gap:3px; color:#7C4DFF;">
-                        <span style="width:3px; height:10px; border-radius:3px; background:#7C4DFF; animation:cgTourWave 0.7s ease-in-out infinite alternate;"></span>
-                        <span style="width:3px; height:20px; border-radius:3px; background:#7C4DFF; animation:cgTourWave 0.55s ease-in-out 0.12s infinite alternate;"></span>
-                        <span style="width:3px; height:14px; border-radius:3px; background:#7C4DFF; animation:cgTourWave 0.8s ease-in-out 0.2s infinite alternate;"></span>
-                        <span style="width:3px; height:24px; border-radius:3px; background:#7C4DFF; animation:cgTourWave 0.6s ease-in-out 0.08s infinite alternate;"></span>
-                        <span style="width:3px; height:11px; border-radius:3px; background:#7C4DFF; animation:cgTourWave 0.75s ease-in-out 0.16s infinite alternate;"></span>
-                    </div>
-                    <div style="min-width:0; flex:1;">
-                        <div id="cg-tour-voice-status" style="margin-bottom:3px; color:#6B5AD7; font-size:0.72rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;">${{labels.speaking}}</div>
-                        <div id="cg-tour-caption" aria-live="polite" style="color:#172033; font-size:0.9rem; line-height:1.4;"></div>
-                    </div>
-                </div>
-                <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
-                    <button id="cg-tour-mute" type="button" style="padding:7px 11px; border:1px solid #D9D8EA; border-radius:9px; background:#FFFFFF; color:#30334A; font-weight:600; cursor:pointer;"></button>
-                    <button id="cg-tour-play" type="button" style="padding:7px 11px; border:0; border-radius:9px; background:#6C55DF; color:#FFFFFF; font-weight:700; cursor:pointer;"></button>
-                </div>
-            `;
 
             const tourStyle = parentDoc.createElement("style");
             tourStyle.id = "cg-tour-style";
             tourStyle.textContent = `
-                @keyframes cgTourWave {{ from {{ transform:scaleY(.45); }} to {{ transform:scaleY(1.2); }} }}
-                @keyframes cgTourArrowPulse {{ from {{ opacity:.72; }} to {{ opacity:1; }} }}
+                #cg-tour-box {{ position:fixed; right:24px; bottom:24px; width:min(360px, calc(100vw - 32px)); padding:20px; box-sizing:border-box; border:1px solid #DCE5DC; border-radius:14px; background:#FFFFFF; color:#1F2937; box-shadow:0 8px 28px rgba(15, 23, 42, .16); font-family:system-ui, sans-serif; z-index:2147483003; }}
+                #cg-tour-box button {{ min-height:38px; padding:8px 14px; border:1px solid #D1D5DB; border-radius:8px; background:#FFFFFF; color:#374151; font:inherit; font-weight:600; cursor:pointer; }}
+                #cg-tour-box button:focus-visible {{ outline:3px solid #86B98A; outline-offset:2px; }}
+                #cg-tour-box #cg-btn-next {{ border-color:#2F6B3B; background:#2F6B3B; color:#FFFFFF; }}
+                #cg-tour-box button:disabled {{ opacity:.45; cursor:default; }}
                 @media (max-width: 520px) {{
-                    #cg-tour-voice-bar {{ bottom:10px !important; padding:11px !important; }}
-                    #cg-tour-exit {{ top:56px !important; right:10px !important; }}
+                    #cg-tour-box {{ right:12px; bottom:12px; width:calc(100vw - 24px); }}
                 }}
             `;
 
             const box = parentDoc.createElement("div");
             box.id = "cg-tour-box";
-            box.style.position = "fixed";
-            box.style.backgroundColor = "#0A2510";
-            box.style.border = "2px solid #76FF03";
-            box.style.borderRadius = "12px";
-            box.style.padding = "20px";
-            box.style.color = "#FFFFFF";
-            box.style.boxSizing = "border-box";
-            box.style.maxWidth = "min(360px, calc(100vw - 24px))";
-            box.style.boxShadow = "0 10px 30px rgba(0,0,0,0.9)";
-            box.style.zIndex = "2147483003";
-            box.style.pointerEvents = "auto";
-            box.style.transition = "all 0.3s ease-in-out";
+            box.setAttribute("role", "dialog");
+            box.setAttribute("aria-live", "polite");
+            box.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px;">
+                    <span id="cg-tour-progress" style="color:#526052; font-size:.85rem; font-weight:600;"></span>
+                    <button id="cg-tour-close" type="button"></button>
+                </div>
+                <div style="height:4px; margin-bottom:16px; overflow:hidden; border-radius:4px; background:#E8EEE8;">
+                    <div id="cg-tour-progress-fill" style="height:100%; border-radius:4px; background:#4B8B55; transition:width .2s ease;"></div>
+                </div>
+                <h3 id="cg-tour-title" style="margin:0 0 8px; color:#1F2937; font-size:1.1rem;"></h3>
+                <p id="cg-tour-description" style="margin:0; color:#4B5563; font-size:.95rem; line-height:1.5;"></p>
+                <div style="display:flex; justify-content:space-between; gap:8px; margin-top:18px;">
+                    <button id="cg-btn-back" type="button"></button>
+                    <button id="cg-btn-next" type="button"></button>
+                </div>
+            `;
 
-            parentDoc.body.appendChild(overlay);
             parentDoc.head.appendChild(tourStyle);
-            parentDoc.body.appendChild(arrow);
             parentDoc.body.appendChild(box);
-            parentDoc.body.appendChild(exitButton);
-            parentDoc.body.appendChild(voiceBar);
-
-            exitButton.onclick = exitTour;
-            parentDoc.getElementById("cg-tour-mute").onclick = toggleTourMute;
-            parentDoc.getElementById("cg-tour-play").onclick = toggleTourPlayback;
-            updateAudioControls();
+            parentDoc.getElementById("cg-tour-close").textContent = labels.close;
+            parentDoc.getElementById("cg-tour-close").onclick = exitTour;
+            parentDoc.getElementById("cg-btn-back").textContent = labels.back;
+            parentDoc.getElementById("cg-btn-back").onclick = () => showStep(currentStep - 1);
+            parentDoc.getElementById("cg-btn-next").onclick = () => {{
+                if (currentStep < steps.length - 1) showStep(currentStep + 1);
+                else exitTour();
+            }};
             window.parent.addEventListener('keydown', handleTourKeydown);
-            window.parent.addEventListener('scroll', updatePositionsOnScroll, true);
-            window.parent.addEventListener('resize', updatePositionsOnScroll);
             showStep(0);
         }}
 
@@ -2178,186 +2071,20 @@ def render_visual_arrow_tour(language_code, lang_name, force_start=False):
             }}
         }}
 
-        function speakStepText(text) {{
-            const speech = window.parent.speechSynthesis;
-            if (!isMuted && speech && typeof SpeechSynthesisUtterance !== "undefined") {{
-                speech.cancel();
-                isPaused = false;
-                isSpeaking = false;
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = "{language_code}";
-                utterance.rate = 0.9;
-                utterance.onstart = () => {{
-                    isSpeaking = true;
-                    updateAudioControls();
-                }};
-                utterance.onend = () => {{
-                    isPaused = false;
-                    isSpeaking = false;
-                    updateAudioControls();
-                }};
-                utterance.onerror = () => {{
-                    isPaused = false;
-                    isSpeaking = false;
-                    updateAudioControls();
-                }};
-                speech.speak(utterance);
-                isSpeaking = true;
-            }} else if (!isMuted) {{
-                isSpeaking = false;
-            }}
-            updateAudioControls();
-        }}
-
-        function updateAudioControls() {{
-            const parentDoc = window.parent.document;
-            const muteButton = parentDoc.getElementById("cg-tour-mute");
-            const playButton = parentDoc.getElementById("cg-tour-play");
-            const status = parentDoc.getElementById("cg-tour-voice-status");
-            const equalizer = parentDoc.getElementById("cg-tour-equalizer");
-            if (!muteButton || !playButton || !status || !equalizer) return;
-            const audioAvailable = Boolean(window.parent.speechSynthesis && typeof SpeechSynthesisUtterance !== "undefined");
-
-            muteButton.textContent = isMuted ? `🔇 ${{labels.unmute}}` : `🔊 ${{labels.mute}}`;
-            muteButton.setAttribute("aria-label", muteButton.textContent);
-            playButton.textContent = isPaused || !isSpeaking ? `▶ ${{labels.play}}` : `Ⅱ ${{labels.pause}}`;
-            playButton.setAttribute("aria-label", playButton.textContent);
-            status.textContent = !audioAvailable ? labels.unavailable : isMuted ? labels.muted : isPaused ? labels.paused : isSpeaking ? labels.speaking : labels.ready;
-            equalizer.style.opacity = isMuted || isPaused || !isSpeaking ? "0.35" : "1";
-            equalizer.style.animationPlayState = isMuted || isPaused || !isSpeaking ? "paused" : "running";
-            muteButton.disabled = !audioAvailable;
-            playButton.disabled = !audioAvailable;
-        }}
-
-        function toggleTourMute() {{
-            isMuted = !isMuted;
-            isPaused = false;
-            isSpeaking = false;
-            if (window.parent.speechSynthesis) window.parent.speechSynthesis.cancel();
-            updateAudioControls();
-            if (!isMuted && steps[currentStep]) speakStepText(steps[currentStep].text);
-        }}
-
-        function toggleTourPlayback() {{
-            const speech = window.parent.speechSynthesis;
-            if (!speech || typeof SpeechSynthesisUtterance === "undefined") return;
-            if (isMuted) {{
-                isMuted = false;
-                isPaused = false;
-                updateAudioControls();
-                if (steps[currentStep]) speakStepText(steps[currentStep].text);
-            }} else if (speech.paused || isPaused) {{
-                speech.resume();
-                isPaused = false;
-                isSpeaking = true;
-                updateAudioControls();
-            }} else if (isSpeaking) {{
-                speech.pause();
-                isPaused = true;
-                updateAudioControls();
-            }} else if (steps[currentStep]) {{
-                speakStepText(steps[currentStep].text);
-            }}
-        }}
-
-        function setSpotlight(rect) {{
-            const parentDoc = window.parent.document;
-            const width = parentDoc.documentElement.clientWidth;
-            const height = parentDoc.documentElement.clientHeight;
-            let left = 0, top = 0, right = width, bottom = height;
-            if (rect) {{
-                const padding = 12;
-                left = Math.max(0, rect.left - padding);
-                top = Math.max(0, rect.top - padding);
-                right = Math.min(width, rect.right + padding);
-                bottom = Math.min(height, rect.bottom + padding);
-            }}
-            const regions = [
-                [0, 0, width, top],
-                [0, top, left, Math.max(0, bottom - top)],
-                [right, top, Math.max(0, width - right), Math.max(0, bottom - top)],
-                [0, bottom, width, Math.max(0, height - bottom)]
-            ];
-            spotlightPanels.forEach((panel, index) => {{
-                const [x, y, panelWidth, panelHeight] = regions[index];
-                panel.style.left = `${{x}}px`;
-                panel.style.top = `${{y}}px`;
-                panel.style.width = `${{panelWidth}}px`;
-                panel.style.height = `${{panelHeight}}px`;
-            }});
-        }}
-
-        function updatePositionsOnScroll() {{
-            const parentDoc = window.parent.document;
-            const step = steps[currentStep];
-            if (!step) return;
-
-            const targetEl = parentDoc.querySelector(step.selector);
-            const arrow = parentDoc.getElementById("cg-tour-arrow");
-            const box = parentDoc.getElementById("cg-tour-box");
-
-            if (targetEl && arrow && box) {{
-                const rect = targetEl.getBoundingClientRect();
-                const boxWidth = 360;
-                setSpotlight(rect);
-                
-                let leftPos = rect.right + 15;
-                if (rect.right + boxWidth + 50 > window.parent.innerWidth) {{
-                    leftPos = rect.left - boxWidth - 25;
-                }}
-
-                arrow.style.display = "block";
-                arrow.style.top = Math.max(10, rect.top + rect.height/2 - 24) + "px";
-                if (leftPos < rect.left) {{
-                    arrow.style.left = Math.max(10, rect.left - 48) + "px";
-                    arrow.style.transform = "none";
-                }} else {{
-                    arrow.style.left = Math.min(window.parent.innerWidth - 50, rect.right + 5) + "px";
-                    arrow.style.transform = "rotate(180deg)";
-                }}
-
-                box.style.transform = "";
-                const boxHeight = box.getBoundingClientRect().height;
-                box.style.top = Math.max(12, Math.min(window.parent.innerHeight - boxHeight - 12, rect.top + rect.height/2 - boxHeight/2)) + "px";
-                box.style.left = Math.max(12, Math.min(window.parent.innerWidth - boxWidth - 12, leftPos)) + "px";
-            }} else if (box) {{
-                if (arrow) arrow.style.display = "none";
-                setSpotlight(null);
-                box.style.top = "50%";
-                box.style.left = "50%";
-                box.style.transform = "translate(-50%, -50%)";
-            }}
-        }}
-
         function showStep(index) {{
             const parentDoc = window.parent.document;
+            if (index < 0 || index >= steps.length) return;
             clearHighlighting();
 
+            currentStep = index;
             const step = steps[index];
-            if (!step) return;
             const targetEl = parentDoc.querySelector(step.selector);
-
-            const arrow = parentDoc.getElementById("cg-tour-arrow");
-            const box = parentDoc.getElementById("cg-tour-box");
-
-            const caption = parentDoc.getElementById("cg-tour-caption");
-            if (caption) caption.textContent = step.text;
-            box.style.transform = "";
-            box.innerHTML = `
-                <h3 style="margin:0 0 10px 0; color:#B69CFF;">${{step.title}}</h3>
-                <p style="margin:0 0 15px 0; color:#F3F1FA; font-size:1rem; line-height:1.4;">${{step.text}}</p>
-                <div style="display:flex; justify-content:flex-end;">
-                    <button id="cg-btn-next" style="background:#6C55DF; color:white; border:none; padding:8px 18px; border-radius:8px; font-weight:bold; cursor:pointer;">${{index < steps.length - 1 ? 'Next ➡️' : 'Finish ✔️'}}</button>
-                </div>
-            `;
-            parentDoc.getElementById("cg-btn-next").onclick = () => {{
-                if (index < steps.length - 1) {{
-                    currentStep++;
-                    showStep(currentStep);
-                }} else {{
-                    exitTour();
-                }}
-            }};
+            parentDoc.getElementById("cg-tour-progress").textContent = `${{labels.step}} ${{index + 1}} ${{labels.of}} ${{steps.length}}`;
+            parentDoc.getElementById("cg-tour-progress-fill").style.width = `${{((index + 1) / steps.length) * 100}}%`;
+            parentDoc.getElementById("cg-tour-title").textContent = step.title;
+            parentDoc.getElementById("cg-tour-description").textContent = step.text;
+            parentDoc.getElementById("cg-btn-back").disabled = index === 0;
+            parentDoc.getElementById("cg-btn-next").textContent = index === steps.length - 1 ? labels.finish : labels.next;
 
             if (targetEl) {{
                 targetEl.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
@@ -2368,18 +2095,12 @@ def render_visual_arrow_tour(language_code, lang_name, force_start=False):
                     borderRadius: targetEl.style.borderRadius,
                     transition: targetEl.style.transition
                 }};
-                targetEl.style.outline = "3px solid #7C4DFF";
-                targetEl.style.boxShadow = "0 0 28px rgba(124, 77, 255, 0.8)";
-                targetEl.style.borderRadius = "8px";
-                targetEl.style.transition = "all 0.3s ease";
+                targetEl.style.outline = "2px solid #4B8B55";
+                targetEl.style.boxShadow = "0 0 0 4px rgba(75, 139, 85, .12)";
+                targetEl.style.borderRadius = "6px";
+                targetEl.style.transition = "outline .2s ease, box-shadow .2s ease";
                 lastHighlightedEl = targetEl;
-
-                setTimeout(updatePositionsOnScroll, 350);
-            }} else {{
-                updatePositionsOnScroll();
             }}
-
-            speakStepText(step.text);
         }}
 
         function handleTourKeydown(event) {{
@@ -2389,24 +2110,13 @@ def render_visual_arrow_tour(language_code, lang_name, force_start=False):
         function exitTour() {{
             const parentDoc = window.parent.document;
             clearHighlighting();
-            const overlay = parentDoc.getElementById("cg-tour-overlay");
-            const arrow = parentDoc.getElementById("cg-tour-arrow");
             const box = parentDoc.getElementById("cg-tour-box");
-            const exitButton = parentDoc.getElementById("cg-tour-exit");
-            const voiceBar = parentDoc.getElementById("cg-tour-voice-bar");
             const tourStyle = parentDoc.getElementById("cg-tour-style");
 
-            if (overlay) overlay.remove();
-            if (arrow) arrow.remove();
             if (box) box.remove();
-            if (exitButton) exitButton.remove();
-            if (voiceBar) voiceBar.remove();
             if (tourStyle) tourStyle.remove();
 
             window.parent.removeEventListener('keydown', handleTourKeydown);
-            window.parent.removeEventListener('scroll', updatePositionsOnScroll, true);
-            window.parent.removeEventListener('resize', updatePositionsOnScroll);
-            window.parent.speechSynthesis.cancel();
         }}
 
         setTimeout(checkAndInitTour, 500);
@@ -3294,7 +3004,7 @@ else:
         if st.button(T["tour_btn"], type="primary", use_container_width=True):
             st.session_state["tour_force_trigger"] = True
 
-    render_visual_arrow_tour(tts_lang, language, force_start=st.session_state["tour_force_trigger"])
+    render_guided_tour(language, force_start=st.session_state["tour_force_trigger"])
     st.session_state["tour_force_trigger"] = False
 
     st.markdown("<br>", unsafe_allow_html=True)
