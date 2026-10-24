@@ -20,10 +20,13 @@ import io
 import csv
 import threading
 import html
+from html import escape as html_escape
+import requests
 from collections import OrderedDict
 import re
 import uuid
 import disease_data as disease_guide_data
+import cropguard_consensus
 
 # --- SETUP & CONFIGURATION ---
 st.set_page_config(
@@ -1000,6 +1003,10 @@ def init_epidemiological_db():
             confidence_score REAL NOT NULL,
             severity_stage TEXT NOT NULL,
             severity_percentage REAL NOT NULL,
+            latitude REAL,
+            longitude REAL,
+            diagnosis_status TEXT,
+            disease_key TEXT,
             FOREIGN KEY(user_id) REFERENCES users(user_id)
         )
     ''')
@@ -1163,6 +1170,10 @@ _EPI_DEMO_SEEDS = [
 _EPI_SCAN_COLUMNS = {
     "lat": "REAL",
     "lon": "REAL",
+    "latitude": "REAL",
+    "longitude": "REAL",
+    "diagnosis_status": "TEXT",
+    "disease_key": "TEXT",
     "loc_source": "TEXT",
     "reporter_key": "TEXT",
     "crop_canon": "TEXT",
@@ -1230,11 +1241,18 @@ def ensure_epi_schema():
             "UPDATE scan_telemetry SET is_demo = 1 "
             "WHERE timestamp = ? AND hub_region = ? AND detected_disease = ?", _EPI_DEMO_SEEDS)
         conn.execute("UPDATE scan_telemetry SET reporter_key = 'u' || user_id WHERE reporter_key IS NULL")
+        conn.execute("UPDATE scan_telemetry SET latitude = lat WHERE latitude IS NULL AND lat IS NOT NULL")
+        conn.execute("UPDATE scan_telemetry SET longitude = lon WHERE longitude IS NULL AND lon IS NOT NULL")
         for (raw,) in conn.execute(
                 "SELECT DISTINCT target_crop FROM scan_telemetry WHERE crop_canon IS NULL").fetchall():
             conn.execute("UPDATE scan_telemetry SET crop_canon = ? "
                          "WHERE target_crop = ? AND crop_canon IS NULL", (epi_canon_crop(raw), raw))
         _epi_apply_label_rule(conn, only_unset=True)
+        conn.execute(
+            """UPDATE scan_telemetry
+               SET diagnosis_status = CASE WHEN label_ok = 1 THEN 'LIKELY' ELSE 'POSSIBLE' END
+               WHERE diagnosis_status IS NULL OR diagnosis_status = ''"""
+        )
         conn.commit()
     finally:
         conn.close()
@@ -1277,13 +1295,14 @@ def log_scan_telemetry(hub_region, target_crop, disease_name, confidence, severi
         conn.execute(
             """INSERT INTO scan_telemetry
                (user_id, timestamp, hub_region, target_crop, detected_disease, confidence_score,
-                severity_stage, severity_percentage, lat, lon, loc_source, reporter_key,
-                crop_canon, label_ok, is_demo, model_tag)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
+                severity_stage, severity_percentage, lat, lon, latitude, longitude, diagnosis_status,
+                disease_key, loc_source, reporter_key, crop_canon, label_ok, is_demo, model_tag)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
             (st.session_state.get("logged_in_user_id", 1), datetime.now().strftime(EPI_TS_FMT),
              hub_region, target_crop, disease_name, confidence, severity_stage, severity_pct,
-             lat, lon, loc_source, epi_reporter_key(), epi_canon_crop(target_crop),
-             1 if label_ok else 0, EPI_MODEL_TAG),
+             lat, lon, lat, lon, "LIKELY" if label_ok else "POSSIBLE",
+             find_disease_guide_key(target_crop, disease_name), loc_source, epi_reporter_key(),
+             epi_canon_crop(target_crop), 1 if label_ok else 0, EPI_MODEL_TAG),
         )
         conn.commit()
     except Exception as e:
@@ -1645,6 +1664,138 @@ def load_vision_labels():
 
 plant_disease_labels = load_vision_labels()
 
+MODEL_SCREENING_MIN_SCORE_PCT = 55.0
+MODEL_SCREENING_MIN_MARGIN_PCT = 5.0
+
+
+def _consensus_configuration():
+    keys = (
+        "GEMINI_API_KEY", "GEMINI_VISION_MODEL", "OLLAMA_BASE_URL", "OLLAMA_MODEL",
+        "GOOGLE_CSE_API_KEY", "GOOGLE_CSE_ID", "AGENT_TIMEOUT_SECONDS",
+    )
+    configuration = {
+        key: os.environ.get(key, "").strip()
+        for key in keys
+    }
+    try:
+        for key in keys:
+            value = st.secrets.get(key)
+            if isinstance(value, str) and value.strip():
+                configuration[key] = value.strip()
+    except (FileNotFoundError, KeyError, RuntimeError):
+        pass
+    try:
+        timeout_seconds = float(configuration["AGENT_TIMEOUT_SECONDS"] or 30.0)
+        if not 1.0 <= timeout_seconds <= 120.0:
+            raise ValueError("timeout must be between 1 and 120 seconds")
+        configuration["AGENT_TIMEOUT_SECONDS"] = timeout_seconds
+    except ValueError as error:
+        st.warning(f"Invalid AGENT_TIMEOUT_SECONDS setting ({error}); using 30 seconds.")
+        configuration["AGENT_TIMEOUT_SECONDS"] = 30.0
+    return configuration
+
+
+def render_consensus_report(report, language):
+    if not report:
+        return
+
+    labels = {
+        "English": {
+            "title": "🤝 Multi-agent screening consensus",
+            "confidence": "Consensus index (not calibrated)",
+            "agreement": "Agent agreement",
+            "health": "Health status",
+            "vision": "Vision assessment",
+            "crosscheck": "Secondary cross-check",
+            "grounding": "Live regional grounding",
+            "symptoms": "Visible symptoms",
+            "alternatives": "Lookalikes / alternatives",
+            "not_configured": "Not configured",
+            "no_symptoms": "No specific visual symptoms returned.",
+            "no_alternatives": "No alternatives were returned.",
+            "no_sources": "Live search is not configured or returned no usable sources.",
+            "notes": "Screening notes",
+        },
+        "Kiswahili": {
+            "title": "🤝 Makubaliano ya uchunguzi wa mawakala wengi",
+            "confidence": "Kielezo cha makubaliano (hakijathibitishwa)",
+            "agreement": "Makubaliano ya mawakala",
+            "health": "Hali ya afya",
+            "vision": "Tathmini ya picha",
+            "crosscheck": "Ukaguzi wa pili",
+            "grounding": "Taarifa za moja kwa moja za eneo",
+            "symptoms": "Dalili zinazoonekana",
+            "alternatives": "Magonjwa yanayofanana / mbadala",
+            "not_configured": "Haijawekwa",
+            "no_symptoms": "Hakuna dalili maalum za picha zilizoripotiwa.",
+            "no_alternatives": "Hakuna magonjwa mbadala yaliyoripotiwa.",
+            "no_sources": "Utafutaji wa moja kwa moja haujawekwa au haujapata vyanzo.",
+            "notes": "Maelezo ya uchunguzi",
+        },
+        "French": {
+            "title": "🤝 Consensus de dépistage multi-agents",
+            "confidence": "Indice de consensus (non calibré)",
+            "agreement": "Accord des agents",
+            "health": "État sanitaire",
+            "vision": "Évaluation visuelle",
+            "crosscheck": "Vérification secondaire",
+            "grounding": "Sources régionales en direct",
+            "symptoms": "Symptômes visibles",
+            "alternatives": "Diagnostics ressemblants / alternatifs",
+            "not_configured": "Non configuré",
+            "no_symptoms": "Aucun symptôme visuel précis n'a été rapporté.",
+            "no_alternatives": "Aucun diagnostic alternatif n'a été rapporté.",
+            "no_sources": "La recherche en direct n'est pas configurée ou n'a fourni aucune source.",
+            "notes": "Notes de dépistage",
+        },
+    }
+    text = labels.get(language, labels["English"])
+    with st.expander(text["title"], expanded=True):
+        vision_name = report["vision"].get("provider") or text["not_configured"]
+        reasoner_name = report["reasoning"].get("provider") or text["not_configured"]
+        metric1, metric2, metric3 = st.columns(3)
+        metric1.metric(
+            text["confidence"],
+            f"{report['consensus_confidence_index']:.1f}%",
+        )
+        metric2.metric(text["health"], report["health_status"].replace("_", " ").title())
+        metric3.metric(text["agreement"], report["agreement"])
+
+        st.markdown(f"**{report['detected_crop']} — {report['primary_diagnosis']}**")
+        tabs = st.tabs([text["vision"], text["crosscheck"], text["grounding"]])
+        with tabs[0]:
+            st.caption(f"{vision_name} · screening score {report['vision'].get('confidence_score', 0.0):.2f}")
+            symptoms = report.get("visual_symptoms") or []
+            st.markdown(
+                "\n".join(f"- {symptom}" for symptom in symptoms)
+                if symptoms else text["no_symptoms"]
+            )
+        with tabs[1]:
+            reasoning = report["reasoning"]
+            st.caption(reasoner_name)
+            st.write(reasoning.get("explanation") or text["not_configured"])
+            alternatives = reasoning.get("alternatives") or []
+            st.markdown(
+                f"**{text['alternatives']}**\n\n"
+                + ("\n".join(f"- {name}" for name in alternatives) if alternatives else text["no_alternatives"])
+            )
+        with tabs[2]:
+            grounding = report["web_grounding"]
+            st.info(grounding.get("message") or text["no_sources"])
+            for result in grounding.get("results", []):
+                with st.container(border=True):
+                    st.markdown(f"**{result.get('title', 'Source')}**")
+                    st.write(result.get("snippet", ""))
+                    url = result.get("url", "")
+                    if url.startswith(("https://", "http://")):
+                        st.link_button("Open source", url)
+        notes = report.get("notes") or []
+        if notes:
+            with st.expander(text["notes"]):
+                for note in notes:
+                    st.caption(note)
+
+
 def supported_class_indices(crop_name):
     crop = str(crop_name).casefold()
     if "maize" in crop or "corn" in crop or "mahindi" in crop:
@@ -1674,15 +1825,24 @@ def _normalize_guide_text(value):
     return re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip()
 
 def _guide_crop_family(crop_name):
-    normalized_crop = f" {_normalize_guide_text(crop_name)} "
+    raw_crop = str(crop_name or "").casefold()
+    normalized_crop = f" {_normalize_guide_text(raw_crop)} "
     matching_families = []
     for family, crop_info in disease_guide_data.CROP_FAMILIES.items():
         synonyms = crop_info[3]
         for synonym in synonyms:
             normalized_synonym = _normalize_guide_text(synonym)
+            if family == "tea" and normalized_synonym == "the" and not re.search(
+                r"\bthé\b", raw_crop
+            ):
+                continue
             if normalized_synonym and f" {normalized_synonym} " in normalized_crop:
                 matching_families.append((len(normalized_synonym), family))
-    return max(matching_families)[1] if matching_families else None
+    if not matching_families:
+        return None
+    longest_match = max(length for length, _ in matching_families)
+    best_families = {family for length, family in matching_families if length == longest_match}
+    return next(iter(best_families)) if len(best_families) == 1 else None
 
 def find_disease_guide_key(crop_name, disease_name):
     family = _guide_crop_family(crop_name)
@@ -1690,7 +1850,8 @@ def find_disease_guide_key(crop_name, disease_name):
     if not family or not normalized_disease:
         return None
 
-    matches = []
+    exact_matches = set()
+    contained_matches = {}
     padded_disease = f" {normalized_disease} "
     for key, entry in disease_guide_data.DISEASES.items():
         if entry["crops"] and family not in entry["crops"]:
@@ -1701,61 +1862,105 @@ def find_disease_guide_key(crop_name, disease_name):
             if len(normalized_variant) < 4:
                 continue
             if normalized_variant == normalized_disease:
-                score = 10000 + len(normalized_variant)
+                exact_matches.add(key)
             elif f" {normalized_variant} " in padded_disease:
-                score = 1000 + len(normalized_variant)
+                contained_matches[key] = max(
+                    contained_matches.get(key, 0), len(normalized_variant)
+                )
             elif padded_disease in f" {normalized_variant} ":
-                score = 500 + len(normalized_disease)
-            else:
-                continue
-            matches.append((score, key))
-    return max(matches)[1] if matches else None
+                contained_matches[key] = max(
+                    contained_matches.get(key, 0), len(normalized_disease)
+                )
+    if len(exact_matches) == 1:
+        return next(iter(exact_matches))
+    if exact_matches:
+        return None
+    if not contained_matches:
+        return None
+    best_length = max(contained_matches.values())
+    best_matches = {
+        key for key, length in contained_matches.items() if length == best_length
+    }
+    return next(iter(best_matches)) if len(best_matches) == 1 else None
 
-def render_disease_guide(guide_key, crop_name, language, severity_stage):
+
+HUB_COUNTRIES = {
+    "Kisii, Kenya (Highland Zone)": "Kenya",
+    "Eldoret, Kenya (Rift Valley Grain Basket)": "Kenya",
+    "Nakuru, Kenya (Rift Valley Horticultural Hub)": "Kenya",
+    "Morogoro, Tanzania (Agricultural Research Hub)": "Tanzania",
+    "Ibadan, Nigeria (Agricultural Research & Maize Belt)": "Nigeria",
+    "Kumasi, Ghana (Cocoa & Grain Belt)": "Ghana",
+}
+
+# No verified registration feed is configured, so chemical recommendations are
+# withheld for every country until a reviewed, country-specific allowlist exists.
+VERIFIED_CHEMICAL_ACTIONS_BY_COUNTRY_AND_CROP = {}
+
+CHEMICAL_ACTION_CODES = frozenset(
+    code
+    for entry in disease_guide_data.DISEASES.values()
+    for code in entry.get("chem", [])
+)
+
+_GUIDE_UI_TEXT = {
+    "English": {
+        "title": "🌿 Disease reference guide",
+        "signs": "Common signs",
+        "now": "What to do now",
+        "cult": "Field practices",
+        "bio": "Biological options",
+        "chem": "Chemical options",
+        "prev": "Prevention",
+        "severe": "Severe cases",
+        "caution": "Use only products registered for this crop and use in your country. Follow the product label, protective-equipment instructions, re-entry interval, and pre-harvest interval; confirm treatment with an agricultural extension officer.",
+        "withheld": "Chemical options are withheld because CropGuard has no verified, crop-specific pesticide registration data for this country. Consult your national agricultural authority or extension officer.",
+        "country_unknown": "Chemical options are withheld because the selected hub has no verified country registration mapping.",
+    },
+    "Kiswahili": {
+        "title": "🌿 Mwongozo wa rejea ya ugonjwa",
+        "signs": "Dalili za kawaida",
+        "now": "Hatua za kuchukua sasa",
+        "cult": "Mbinu za shambani",
+        "bio": "Chaguo za kibayolojia",
+        "chem": "Chaguo za kemikali",
+        "prev": "Kinga",
+        "severe": "Hali kali",
+        "caution": "Tumia bidhaa zilizosajiliwa kwa zao na matumizi haya nchini kwako pekee. Fuata lebo, maelekezo ya vifaa vya kujikinga, muda wa kuingia tena shambani na muda wa kusubiri kabla ya kuvuna; thibitisha matibabu kwa afisa wa ugani.",
+        "withheld": "Chaguo za kemikali zimezuiwa kwa sababu CropGuard haina data iliyothibitishwa ya usajili wa viuatilifu kwa zao hili nchini. Wasiliana na mamlaka ya kilimo au afisa wa ugani wa nchi yako.",
+        "country_unknown": "Chaguo za kemikali zimezuiwa kwa sababu kituo kilichochaguliwa hakina ulinganisho wa nchi uliothibitishwa.",
+    },
+    "French": {
+        "title": "🌿 Guide de référence sur la maladie",
+        "signs": "Signes fréquents",
+        "now": "Mesures immédiates",
+        "cult": "Pratiques culturales",
+        "bio": "Options biologiques",
+        "chem": "Options chimiques",
+        "prev": "Prévention",
+        "severe": "Cas graves",
+        "caution": "N'utilisez que des produits homologués pour cette culture et cet usage dans votre pays. Respectez l'étiquette, les équipements de protection, le délai de rentrée et le délai avant récolte ; faites confirmer le traitement par un conseiller agricole.",
+        "withheld": "Les options chimiques sont masquées, car CropGuard ne dispose pas de données vérifiées d'homologation des pesticides pour cette culture dans ce pays. Consultez l'autorité agricole nationale ou un conseiller agricole.",
+        "country_unknown": "Les options chimiques sont masquées, car le hub sélectionné n'a pas de correspondance pays vérifiée.",
+    },
+}
+
+
+def build_disease_advisory(guide_key, crop_name, language, severity_stage, hub_label):
     entry = disease_guide_data.DISEASES.get(guide_key)
     if not entry:
-        return
+        return None
 
-    lang_index = {"English": 0, "Kiswahili": 1, "French": 2}.get(language, 0)
-    labels = {
-        "English": {
-            "title": "🌿 Disease reference guide",
-            "signs": "Common signs",
-            "now": "What to do now",
-            "cult": "Field practices",
-            "bio": "Biological options",
-            "chem": "Chemical options",
-            "prev": "Prevention",
-            "severe": "Severe cases",
-            "caution": "Follow local product labels and regulations; confirm diagnosis and treatment with an agricultural extension officer.",
-        },
-        "Kiswahili": {
-            "title": "🌿 Mwongozo wa rejea ya ugonjwa",
-            "signs": "Dalili za kawaida",
-            "now": "Hatua za kuchukua sasa",
-            "cult": "Mbinu za shambani",
-            "bio": "Chaguo za kibayolojia",
-            "chem": "Chaguo za kemikali",
-            "prev": "Kinga",
-            "severe": "Hali kali",
-            "caution": "Fuata lebo na kanuni za bidhaa za eneo lako; thibitisha utambuzi na matibabu kwa afisa wa ugani wa kilimo.",
-        },
-        "French": {
-            "title": "🌿 Guide de référence sur la maladie",
-            "signs": "Signes fréquents",
-            "now": "Mesures immédiates",
-            "cult": "Pratiques culturales",
-            "bio": "Options biologiques",
-            "chem": "Options chimiques",
-            "prev": "Prévention",
-            "severe": "Cas graves",
-            "caution": "Respectez les étiquettes et règles locales ; faites confirmer le diagnostic et le traitement par un conseiller agricole.",
-        },
-    }[language if language in ("English", "Kiswahili", "French") else "English"]
-
-    st.markdown(f"#### {labels['title']}")
-    st.markdown(f"**{entry['name'][lang_index]}**")
-    st.markdown(f"**{labels['signs']}:** {entry['signs'][lang_index]}")
+    language = language if language in _GUIDE_UI_TEXT else "English"
+    labels = _GUIDE_UI_TEXT[language]
+    lang_index = {"English": 0, "Kiswahili": 1, "French": 2}[language]
+    country = HUB_COUNTRIES.get(hub_label)
+    family = _guide_crop_family(crop_name)
+    allowed_chemical_codes = (
+        VERIFIED_CHEMICAL_ACTIONS_BY_COUNTRY_AND_CROP
+        .get(country, {})
+        .get(family, frozenset())
+    )
 
     sections = [
         ("now", "now"),
@@ -1767,25 +1972,144 @@ def render_disease_guide(guide_key, crop_name, language, severity_stage):
     if severity_stage.startswith("Stage 3"):
         sections.append(("severe", "severe"))
 
-    family = _guide_crop_family(crop_name)
     family_actions = entry.get("extra", {}).get(family, {})
-    shown_any = False
+    rendered_sections = []
+    has_chemical_advice = False
+    allowed_chemical_advice = False
     for section_key, label_key in sections:
         codes = list(entry.get(section_key, []))
         codes.extend(family_actions.get(section_key, []))
-        sentences = list(dict.fromkeys(
-            disease_guide_data.ACTIONS[code][lang_index]
+        has_chemical_advice = has_chemical_advice or any(
+            code in CHEMICAL_ACTION_CODES for code in codes
+        )
+        allowed_chemical_advice = allowed_chemical_advice or any(
+            code in CHEMICAL_ACTION_CODES and code in allowed_chemical_codes
             for code in codes
-            if code in disease_guide_data.ACTIONS
-        ))
+        )
+        sentences = []
+        for code in codes:
+            if code not in disease_guide_data.ACTIONS:
+                continue
+            if code in CHEMICAL_ACTION_CODES and code not in allowed_chemical_codes:
+                continue
+            sentences.append(disease_guide_data.ACTIONS[code][lang_index])
+        sentences = list(dict.fromkeys(sentences))
         if sentences:
-            shown_any = True
-            st.markdown(f"**{labels[label_key]}**")
+            rendered_sections.append((labels[label_key], sentences))
+    return {
+        "guide_key": guide_key,
+        "crop_name": crop_name,
+        "severity_stage": severity_stage,
+        "title": labels["title"],
+        "name": entry["name"][lang_index],
+        "signs_label": labels["signs"],
+        "signs": entry["signs"][lang_index],
+        "sections": rendered_sections,
+        "has_chemical_advice": has_chemical_advice,
+        "chemical_allowed": allowed_chemical_advice,
+        "chemical_notice": (
+            labels["caution"] if allowed_chemical_advice
+            else labels["withheld"] if country
+            else labels["country_unknown"]
+        ),
+        "country": country,
+    }
+
+
+def render_disease_guide(guide_key, crop_name, language, severity_stage, hub_label):
+    advisory = build_disease_advisory(
+        guide_key, crop_name, language, severity_stage, hub_label
+    )
+    if not advisory:
+        return
+
+    st.markdown(f"#### {advisory['title']}")
+    st.markdown(f"**{advisory['name']}**")
+    st.markdown(f"**{advisory['signs_label']}:** {advisory['signs']}")
+    if advisory["sections"]:
+        action_tabs = st.tabs([heading for heading, _ in advisory["sections"]])
+        for action_tab, (_, sentences) in zip(action_tabs, advisory["sections"]):
+            with action_tab:
+                st.markdown("\n".join(f"- {sentence}" for sentence in sentences))
+    if advisory["has_chemical_advice"]:
+        if advisory["chemical_allowed"]:
+            st.caption(advisory["chemical_notice"])
+        else:
+            st.warning(advisory["chemical_notice"])
+
+
+def current_disease_advisory(language, hub_label):
+    if not st.session_state.get("last_diagnosis_available"):
+        return None
+    return build_disease_advisory(
+        st.session_state.get("last_disease_guide"),
+        st.session_state.get("selected_crop"),
+        language,
+        st.session_state.get("last_severity_stage") or "",
+        hub_label,
+    )
+
+
+def render_current_disease_advisory(language, hub_label):
+    advisory = current_disease_advisory(language, hub_label)
+    if not advisory:
+        return
+    with st.expander(advisory["title"]):
+        render_disease_guide(
+            st.session_state.get("last_disease_guide"),
+            st.session_state.get("selected_crop"),
+            language,
+            st.session_state.get("last_severity_stage") or "",
+            hub_label,
+        )
+
+
+def disease_advisory_for_prompt(prompt, language, hub_label):
+    explicit_family = _guide_crop_family(prompt)
+    families = [explicit_family] if explicit_family else list(disease_guide_data.CROP_FAMILIES)
+    matches = {}
+    for family in families:
+        guide_key = find_disease_guide_key(family, prompt)
+        if guide_key:
+            matches.setdefault(guide_key, family)
+    if len(matches) != 1:
+        return None
+    guide_key, family = next(iter(matches.items()))
+    crop_name = disease_guide_data.CROP_FAMILIES[family][0]
+    return build_disease_advisory(
+        guide_key, crop_name, language, "", hub_label
+    )
+
+
+def render_chat_disease_advisory(advisory):
+    if not advisory:
+        return
+    with st.expander(advisory["title"]):
+        st.markdown(f"**{advisory['name']}**")
+        st.markdown(f"**{advisory['signs_label']}:** {advisory['signs']}")
+        for heading, sentences in advisory["sections"]:
+            st.markdown(f"**{heading}**")
             st.markdown("\n".join(f"- {sentence}" for sentence in sentences))
-            if section_key == "chem":
-                st.caption(labels["caution"])
-    if entry.get("report") and not shown_any:
-        st.caption(labels["caution"])
+        if advisory["has_chemical_advice"]:
+            if advisory["chemical_allowed"]:
+                st.caption(advisory["chemical_notice"])
+            else:
+                st.warning(advisory["chemical_notice"])
+
+
+def format_disease_advisory_context(advisory):
+    if not advisory:
+        return ""
+    lines = [
+        f"Reference guide for the current screening result: {advisory['name']}.",
+        f"Visible signs from the reference guide: {advisory['signs']}",
+    ]
+    for heading, sentences in advisory["sections"]:
+        lines.append(f"{heading}: " + " ".join(sentences))
+    if advisory["has_chemical_advice"] and not advisory["chemical_allowed"]:
+        lines.append(advisory["chemical_notice"])
+    return "\n".join(lines)
+
 
 def assess_image_quality(image):
     width, height = image.size
@@ -2701,6 +3025,643 @@ elif language == "French":
 else:
     tts_lang = "en-US"
 
+def generate_cropguard_reply(prompt, messages, hub_label, zone_data, language,
+                             knowledge_context=""):
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GEMINI_API_KEY", "").strip()
+        except FileNotFoundError:
+            api_key = ""
+    if not api_key:
+        raise RuntimeError(
+            "CropGuard chat needs a Gemini API key. Set GEMINI_API_KEY as an environment "
+            "variable or add GEMINI_API_KEY to your Streamlit secrets."
+        )
+
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    system_instruction = f"""
+You are CropGuard AI, an expert, practical, and empathetic agricultural assistant for farmers,
+extension workers, and agricultural researchers worldwide. Give accurate, actionable,
+science-based guidance in clear language. Explain technical terms simply and format answers
+as concise steps or bullets suitable for reading on a phone.
+
+Help with crop disease, pest, nutrient, and environmental-stress diagnosis; soil health,
+rotation, irrigation, fertilizer, planting, seed choice, harvest and post-harvest handling;
+and resilience to drought, heavy rain, frost, and heat. For diagnosis, explain uncertainty
+and ask about crop, location, symptoms, and timing when those details matter.
+
+Prefer integrated pest management, prevention, and practical organic or biological controls
+before chemical options. Never invent pesticide products, rates, or local approvals. Before
+high-risk chemical or financial advice, ask for missing details such as exact crop, location,
+crop stage, and product label. If discussing a pesticide, tell the user to follow the local
+registered product label, protective-equipment and re-entry instructions, and local rules;
+do not recommend exceeding label rates or mixing products without label guidance.
+Do not name or recommend a pesticide active ingredient unless the supplied CropGuard
+knowledge-base context explicitly includes that ingredient as verified for the selected
+country and crop. When it is withheld or absent, give non-chemical options and refer the
+user to their national agricultural authority or extension officer.
+Be transparent when uncertain, and recommend a local extension officer for urgent or
+high-consequence decisions.
+
+Respond in {language}. Use the user's language if their message clearly uses a different
+language. Consider this current farm context when relevant: region={hub_label}; temperature
+{zone_data.get("temp", "unknown")} C; humidity {zone_data.get("humidity", "unknown")}%;
+regional risk={zone_data.get("risk", "not available")}. Treat these as contextual clues,
+not proof of a diagnosis. Do not assume every question is about this region or these crops.
+
+The following server-generated CropGuard knowledge-base text is reference information, not
+proof of diagnosis. Preserve its uncertainty and do not add pesticide ingredients or
+registration claims omitted from it:
+{knowledge_context or "No current CropGuard disease-guide entry is available."}
+"""
+
+    conversation = messages[1:] if messages and messages[0].get("role") == "assistant" else messages
+    contents = [
+        {
+            "role": "model" if message["role"] == "assistant" else "user",
+            "parts": [{"text": message["content"]}],
+        }
+        for message in conversation[-12:]
+        if message.get("role") in {"user", "assistant"} and message.get("content")
+    ]
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+
+    response = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        headers={"x-goog-api-key": api_key},
+        json={
+            "systemInstruction": {"parts": [{"text": system_instruction}]},
+            "contents": contents,
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 900},
+        },
+        timeout=(10, 60),
+    )
+    if not response.ok:
+        try:
+            error_data = response.json()
+            detail = error_data.get("error", {}).get("message", "")
+        except (ValueError, AttributeError):
+            detail = ""
+        message = f"Gemini API returned HTTP {response.status_code}."
+        if detail:
+            message += f" {detail}"
+        raise RuntimeError(message)
+
+    try:
+        result = response.json()
+    except ValueError as error:
+        raise RuntimeError("Gemini returned an invalid response. Please try again.") from error
+
+    if not isinstance(result, dict):
+        raise RuntimeError("Gemini returned an invalid response. Please try again.")
+    candidates = result.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise RuntimeError("Gemini did not return an answer. Please rephrase your question and try again.")
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        raise RuntimeError("Gemini returned an invalid answer. Please try again.")
+    content = candidate.get("content")
+    parts = content.get("parts") if isinstance(content, dict) else None
+    if not isinstance(parts, list):
+        raise RuntimeError("Gemini did not return a text answer. Please try again.")
+    reply = "\n".join(
+        part["text"] for part in parts
+        if isinstance(part, dict) and isinstance(part.get("text"), str)
+    ).strip()
+    if not reply:
+        raise RuntimeError("Gemini returned an empty answer. Please try again.")
+    return reply
+
+
+# ===========================================================================
+# Epidemiological heatmap dashboard
+# ===========================================================================
+MAP_CELL_DEG = 0.05
+MAP_PERIOD_OPTIONS = (0, 7, 14, 30, 90)
+MAP_VIEWPORT_PX = (900, 500)
+MAP_STYLE = getattr(getattr(pdk, "map_styles", None), "DARK", "dark")
+HEATMAP_COLOR_RANGE = [
+    [255, 255, 178], [254, 217, 118], [254, 178, 76],
+    [253, 141, 60], [240, 59, 32], [189, 0, 38],
+]
+HOTSPOT_KEYS = ["hub_region", "cell_lat", "cell_lon"]
+MAP_FRAME_COLUMNS = [
+    "scan_id", "timestamp", "hub_region", "target_crop", "crop_family",
+    "detected_disease", "disease_key", "severity", "status", "latitude", "longitude",
+]
+MAP_SEVERITY_BANDS = (40, 70)
+
+
+def _map_text(T, key, default, **values):
+    text = T.get(key, default)
+    if not isinstance(text, str):
+        text = default
+    if values:
+        try:
+            return text.format(**values)
+        except (KeyError, IndexError, ValueError):
+            try:
+                return default.format(**values)
+            except (KeyError, IndexError, ValueError):
+                return default
+    return text
+
+
+def telemetry_version():
+    conn = _epi_conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(scan_id), 0) FROM scan_telemetry"
+        ).fetchone()
+    finally:
+        conn.close()
+    return tuple(row)
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def _map_frame_cached(version, language):
+    conn = _epi_conn()
+    try:
+        raw = pd.read_sql_query(
+            """
+            SELECT scan_id, timestamp, hub_region, target_crop, crop_canon AS crop_family,
+                   detected_disease, disease_key, severity_percentage AS severity,
+                   diagnosis_status AS status, latitude, longitude
+            FROM scan_telemetry
+            WHERE lower(COALESCE(detected_disease, '')) <> 'healthy'
+              AND lower(COALESCE(disease_key, '')) <> 'healthy'
+              AND scan_id <= ?
+            """,
+            conn,
+            params=(version[1],),
+        )
+    finally:
+        conn.close()
+    return prepare_map_frame(raw, language)
+
+
+def load_map_frame(language):
+    return _map_frame_cached(telemetry_version(), language)
+
+
+def prepare_map_frame(raw, language):
+    df = raw.reindex(columns=MAP_FRAME_COLUMNS).copy()
+    located_hubs = {
+        name: hub for name, hub in GLOBAL_AGRICULTURAL_HUBS.items()
+        if name != GPS_FALLBACK_HUB
+    }
+    df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
+    df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
+    gps_valid = (
+        df["latitude"].between(-90, 90)
+        & df["longitude"].between(-180, 180)
+    )
+    df["gps"] = gps_valid
+    hub_latitudes = {name: hub["lat"] for name, hub in located_hubs.items()}
+    hub_longitudes = {name: hub["lon"] for name, hub in located_hubs.items()}
+    df["lat"] = df["latitude"].where(gps_valid, df["hub_region"].map(hub_latitudes))
+    df["lon"] = df["longitude"].where(gps_valid, df["hub_region"].map(hub_longitudes))
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+    df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
+
+    crop_source = df["crop_family"].where(df["crop_family"].notna(), df["target_crop"])
+    df["crop_family"] = crop_source.map(_guide_crop_family)
+    lang_index = {"English": 0, "Kiswahili": 1, "French": 2}.get(language, 0)
+    df["crop"] = df["crop_family"].map(
+        lambda family: disease_guide_data.CROP_FAMILIES[family][lang_index]
+        if family in disease_guide_data.CROP_FAMILIES else None
+    ).fillna(df["target_crop"])
+
+    def resolve_disease_key(row):
+        key = row["disease_key"]
+        if isinstance(key, str) and key in disease_guide_data.DISEASES:
+            return key
+        return find_disease_guide_key(row["target_crop"], row["detected_disease"])
+
+    df["disease_key"] = df.apply(resolve_disease_key, axis=1)
+    df["disease"] = df["disease_key"].map(
+        lambda key: disease_guide_data.DISEASES[key]["name"][lang_index]
+        if key in disease_guide_data.DISEASES else None
+    ).fillna(df["detected_disease"])
+    df["status"] = df["status"].fillna("LEGACY").replace("", "LEGACY")
+    df["severity"] = pd.to_numeric(df["severity"], errors="coerce").fillna(0.0).clip(0.0, 100.0)
+    df["ts"] = pd.to_datetime(df["timestamp"], errors="coerce", format=EPI_TS_FMT)
+    return df
+
+
+def filter_map_frame(df, crops=(), severity_range=(0, 100), period_days=0,
+                     include_possible=True, now=None):
+    low, high = severity_range
+    mask = df["severity"].between(low, high)
+    if crops:
+        mask &= df["crop"].isin(list(crops))
+    if period_days:
+        current_time = now if now is not None else pd.Timestamp.now()
+        mask &= df["ts"] >= current_time - pd.Timedelta(days=period_days)
+    if not include_possible:
+        mask &= df["status"] != "POSSIBLE"
+    return df[mask]
+
+
+def aggregate_hotspots(df, cell_deg=MAP_CELL_DEG):
+    columns = HOTSPOT_KEYS + [
+        "lat", "lon", "cases", "avg_sev", "max_sev", "weight", "likely", "gps",
+        "last_seen", "dominant", "dominant_cases",
+    ]
+    located = df.dropna(subset=["lat", "lon"])
+    if located.empty:
+        return pd.DataFrame(columns=columns)
+    grouped_data = located.assign(
+        cell_lat=(located["lat"] / cell_deg).round() * cell_deg,
+        cell_lon=(located["lon"] / cell_deg).round() * cell_deg,
+        is_likely=located["status"].eq("LIKELY"),
+    )
+    aggregate = grouped_data.groupby(HOTSPOT_KEYS, sort=False).agg(
+        lat=("lat", "mean"),
+        lon=("lon", "mean"),
+        cases=("severity", "size"),
+        avg_sev=("severity", "mean"),
+        max_sev=("severity", "max"),
+        sum_sev=("severity", "sum"),
+        likely=("is_likely", "sum"),
+        gps=("gps", "any"),
+        last_seen=("ts", "max"),
+    ).reset_index()
+    dominant = (
+        grouped_data.groupby(HOTSPOT_KEYS + ["disease"], sort=False)
+        .size().rename("dominant_cases").reset_index()
+        .sort_values("dominant_cases", ascending=False, kind="stable")
+        .drop_duplicates(HOTSPOT_KEYS)
+        .rename(columns={"disease": "dominant"})
+    )
+    aggregate = aggregate.merge(dominant, on=HOTSPOT_KEYS, how="left")
+    aggregate["weight"] = aggregate.pop("sum_sev") / 100.0
+    aggregate["cases"] = aggregate["cases"].astype(int)
+    aggregate["likely"] = aggregate["likely"].astype(int)
+    return aggregate.sort_values(
+        ["cases", "avg_sev"], ascending=False, kind="stable"
+    ).reset_index(drop=True)[columns]
+
+
+def _mercator_y(lat_deg):
+    return np.log(np.tan(np.pi / 4 + np.radians(np.clip(lat_deg, -85.0, 85.0)) / 2))
+
+
+def compute_view_state(lats, lons, *, width_px=MAP_VIEWPORT_PX[0],
+                       height_px=MAP_VIEWPORT_PX[1], padding=0.30,
+                       min_zoom=1.5, max_zoom=10.0, single_point_zoom=7.0, pitch=0.0):
+    latitudes = np.asarray(lats, dtype=float)
+    longitudes = np.asarray(lons, dtype=float)
+    valid = np.isfinite(latitudes) & np.isfinite(longitudes)
+    latitudes, longitudes = latitudes[valid], longitudes[valid]
+    if latitudes.size == 0:
+        return pdk.ViewState(latitude=0.0, longitude=20.0, zoom=2.0, pitch=pitch, bearing=0)
+    lon_min, lon_max = float(longitudes.min()), float(longitudes.max())
+    y_min, y_max = float(_mercator_y(latitudes.min())), float(_mercator_y(latitudes.max()))
+    lon_span, y_span = lon_max - lon_min, y_max - y_min
+    if lon_span < 1e-6 and y_span < 1e-9:
+        zoom = single_point_zoom
+    else:
+        usable_width = width_px * (1 - padding)
+        usable_height = height_px * (1 - padding)
+        zoom_lon = math.log2(usable_width * 360.0 / (256.0 * lon_span)) if lon_span > 1e-6 else max_zoom
+        zoom_lat = math.log2(usable_height * 2 * math.pi / (256.0 * y_span)) if y_span > 1e-9 else max_zoom
+        zoom = min(zoom_lon, zoom_lat)
+    centre_lat = math.degrees(2 * math.atan(math.exp((y_min + y_max) / 2)) - math.pi / 2)
+    return pdk.ViewState(
+        latitude=centre_lat,
+        longitude=(lon_min + lon_max) / 2,
+        zoom=float(np.clip(zoom, min_zoom, max_zoom)),
+        pitch=pitch,
+        bearing=0,
+    )
+
+
+def map_span_km(lats, lons):
+    latitudes = np.asarray(lats, dtype=float)
+    longitudes = np.asarray(lons, dtype=float)
+    if latitudes.size == 0:
+        return 50.0
+    return max(50.0, haversine_km(
+        float(latitudes.min()), float(longitudes.min()),
+        float(latitudes.max()), float(longitudes.max()),
+    ))
+
+
+def _outbreak_color(severity):
+    low, high = MAP_SEVERITY_BANDS
+    if severity > high:
+        return [211, 47, 47, 220]
+    if severity > low:
+        return [245, 124, 0, 220]
+    return [56, 142, 60, 220]
+
+
+def _rgb_css(rgb):
+    return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
+
+
+def map_tooltip(T):
+    return {
+        "html": (
+            "<div style='font-family: \"Source Sans Pro\", sans-serif; font-size: 13px; line-height: 1.5;'>"
+            "<div style='font-weight: 800; font-size: 14px; color: #76FF03;'>{region}</div>"
+            f"{html_escape(_map_text(T, 'tt_cases', 'Cases'))}: <b>{{cases}}</b><br>"
+            f"{html_escape(_map_text(T, 'tt_dominant', 'Dominant'))}: <b>{{dominant}}</b><br>"
+            f"{html_escape(_map_text(T, 'tt_avg_sev', 'Avg severity'))}: <b>{{avg_sev_txt}}%</b><br>"
+            f"{html_escape(_map_text(T, 'tt_last', 'Last report'))}: {{last_seen_txt}}"
+            "</div>"
+        ),
+        "style": {
+            "backgroundColor": "rgba(10, 37, 16, 0.96)",
+            "color": "#FFFFFF",
+            "border": "1px solid #76FF03",
+            "borderRadius": "8px",
+            "padding": "8px 12px",
+            "boxShadow": "0 6px 18px rgba(0,0,0,0.6)",
+        },
+    }
+
+
+def hotspot_layer_data(agg, T, base_radius_m):
+    field_tag = f" · {_map_text(T, 'tt_field_cluster', 'field cluster')}"
+    data = pd.DataFrame({
+        "lon": agg["lon"].astype(float),
+        "lat": agg["lat"].astype(float),
+        "cases": agg["cases"].astype(int),
+        "avg_sev": agg["avg_sev"].astype(float).round(1),
+        "weight": agg["weight"].astype(float),
+        "region": [
+            html_escape(str(hub) + (field_tag if has_gps else ""))
+            for hub, has_gps in zip(agg["hub_region"], agg["gps"])
+        ],
+        "dominant": agg["dominant"].fillna("—").astype(str).map(html_escape),
+        "avg_sev_txt": agg["avg_sev"].astype(float).map("{:.1f}".format),
+        "last_seen_txt": agg["last_seen"].map(
+            lambda timestamp: timestamp.strftime("%Y-%m-%d") if pd.notna(timestamp) else "—"
+        ),
+    })
+    data["color"] = data["avg_sev"].map(_outbreak_color)
+    max_cases = max(int(data["cases"].max()), 1)
+    data["radius_m"] = base_radius_m * (0.6 + 0.9 * np.sqrt(data["cases"] / max_cases))
+    return data
+
+
+def build_map_layers(data, *, show_heat, show_overlay, overlay_style,
+                     base_radius_m, span_km):
+    layers = []
+    if show_heat:
+        layers.append(pdk.Layer(
+            "HeatmapLayer",
+            data=data[["lon", "lat", "weight"]],
+            id="outbreak-density",
+            get_position=["lon", "lat"],
+            get_weight="weight",
+            aggregation="SUM",
+            radius_pixels=70,
+            intensity=1.0,
+            threshold=0.03,
+            opacity=0.85,
+            color_range=HEATMAP_COLOR_RANGE,
+        ))
+    if show_overlay:
+        common = dict(data=data, get_position=["lon", "lat"], pickable=True, auto_highlight=True)
+        if overlay_style == "columns":
+            layers.append(pdk.Layer(
+                "ColumnLayer",
+                id="severity-columns",
+                get_elevation="avg_sev",
+                elevation_scale=span_km * 1000 * 0.35 / 100.0,
+                radius=base_radius_m,
+                get_fill_color="color",
+                extruded=True,
+                coverage=1.0,
+                **common,
+            ))
+        else:
+            layers.append(pdk.Layer(
+                "ScatterplotLayer",
+                id="case-circles",
+                get_radius="radius_m",
+                get_fill_color="color",
+                radius_min_pixels=5,
+                radius_max_pixels=70,
+                stroked=True,
+                get_line_color=[255, 255, 255],
+                line_width_min_pixels=1,
+                opacity=0.85,
+                **common,
+            ))
+    return layers
+
+
+def render_map_legend(T, *, show_heat, show_overlay, overlay_style):
+    low, high = MAP_SEVERITY_BANDS
+    parts = []
+    if show_heat:
+        gradient = ", ".join(_rgb_css(color) for color in HEATMAP_COLOR_RANGE)
+        parts.append(
+            "<div class='cg-legend-block'>"
+            f"<div class='cg-legend-title'>{html_escape(_map_text(T, 'legend_heat', 'Heatmap'))}</div>"
+            f"<div class='cg-gradient' style='background: linear-gradient(90deg, {gradient});'></div>"
+            f"<div class='cg-gradient-labels'><span>{html_escape(_map_text(T, 'legend_low', 'Low'))}</span>"
+            f"<span>{html_escape(_map_text(T, 'legend_high', 'High'))}</span></div></div>"
+        )
+    if show_overlay:
+        chips = "".join(
+            "<span class='cg-chip'><span class='cg-dot' "
+            f"style='background:{_rgb_css(_outbreak_color(severity))};'></span>"
+            f"{html_escape(_map_text(T, key, key, lo=low, hi=high))}</span>"
+            for key, severity in (("sev_1", 0), ("sev_2", (low + high) / 2), ("sev_3", 100))
+        )
+        note_key = "legend_columns" if overlay_style == "columns" else "legend_points"
+        parts.append(
+            "<div class='cg-legend-block'>"
+            f"<div class='cg-legend-title'>{html_escape(_map_text(T, 'sev_key_title', 'Severity Key'))}</div>"
+            f"<div class='cg-chips'>{chips}</div>"
+            f"<div class='cg-legend-note'>{html_escape(_map_text(T, note_key, ''))}</div></div>"
+        )
+    if not parts:
+        return
+    st.markdown("""
+    <style>
+    .cg-legend { display: flex; flex-wrap: wrap; gap: 18px 32px; background: #12301A; border: 1px solid #76FF03;
+                 border-radius: 12px; padding: 14px 20px; margin: 8px 0 14px 0; box-shadow: 0 6px 20px rgba(0,0,0,0.6); }
+    .cg-legend * { color: #FFFFFF !important; text-shadow: none !important; }
+    .cg-legend-block { flex: 1 1 260px; min-width: 0; }
+    .cg-legend-title { font-weight: 800; font-size: 0.95rem; margin-bottom: 6px; }
+    .cg-gradient { height: 12px; border-radius: 6px; }
+    .cg-gradient-labels { display: flex; justify-content: space-between; font-size: 0.8rem; opacity: 0.85; margin-top: 2px; }
+    .cg-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.88rem; font-weight: 600; }
+    .cg-chip { display: inline-flex; align-items: center; gap: 6px; }
+    .cg-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid #FFFFFF; }
+    .cg-legend-note { font-size: 0.8rem; font-style: italic; margin-top: 6px; color: #C5E1A5 !important; }
+    </style>
+    """ + f"<div class='cg-legend'>{''.join(parts)}</div>", unsafe_allow_html=True)
+
+
+def view_map(ctx: types.SimpleNamespace) -> None:
+    T, language = ctx.T, ctx.language
+    st.title(_map_text(T, "map_title", "Epidemiological Heatmap"))
+    subtitle = _map_text(T, "map_subtitle", "")
+    st.markdown(
+        f"<p style='font-size: 1.2rem; font-weight: 500;'>{html_escape(subtitle)}</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
+    frame = load_map_frame(language)
+    if frame.empty:
+        with st.container(border=True):
+            st.markdown(f"### {_map_text(T, 'map_cluster_header', 'Outbreak Clusters')}")
+            st.info(_map_text(T, "no_map_data", "No map data yet."))
+        return
+
+    @st.fragment
+    def outbreak_map():
+        with st.container(border=True):
+            st.markdown(f"### {_map_text(T, 'map_cluster_header', 'Outbreak Clusters')}")
+            filter_col, severity_col, layers_col = st.columns([2.2, 2.2, 1.6], gap="medium")
+            with filter_col:
+                crops = st.multiselect(
+                    _map_text(T, "filter_crop", "Filter Crop"),
+                    sorted(frame["crop"].dropna().unique().tolist()),
+                    placeholder=_map_text(T, "all_crops_opt", "All Crops"),
+                    key=f"map_crops_{language}",
+                )
+                period = st.selectbox(
+                    _map_text(T, "map_period", "Period"),
+                    MAP_PERIOD_OPTIONS,
+                    key="map_period",
+                    format_func=lambda days: (
+                        _map_text(T, "period_all", "All time") if days == 0
+                        else _map_text(T, "period_days", "Last {n} days", n=days)
+                    ),
+                )
+            with severity_col:
+                severity_range = st.slider(
+                    _map_text(T, "map_severity_range", "Severity range (%)"),
+                    0, 100, (0, 100), step=5, key="map_severity",
+                )
+                include_possible = st.toggle(
+                    _map_text(T, "map_include_possible", "Include possible"),
+                    value=True,
+                    key="map_possible",
+                )
+            with layers_col:
+                show_heat = st.toggle(
+                    _map_text(T, "map_layer_heat", "Density heatmap"),
+                    value=True,
+                    key="map_heat",
+                )
+                show_overlay = st.toggle(
+                    _map_text(T, "map_layer_overlay", "Inspection overlay"),
+                    value=True,
+                    key="map_overlay",
+                )
+                overlay_style = st.radio(
+                    _map_text(T, "map_layer_overlay", "Overlay"),
+                    ("columns", "points"),
+                    horizontal=True,
+                    key="map_overlay_style",
+                    label_visibility="collapsed",
+                    disabled=not show_overlay,
+                    format_func=lambda style: _map_text(
+                        T,
+                        "map_overlay_columns" if style == "columns" else "map_overlay_points",
+                        "3D columns" if style == "columns" else "Circles",
+                    ),
+                )
+            filtered = filter_map_frame(
+                frame, crops, severity_range, period, include_possible
+            )
+            located = filtered.dropna(subset=["lat", "lon"])
+            unlocated = len(filtered) - len(located)
+            if located.empty:
+                st.warning(_map_text(T, "no_crop_match", "No telemetry matches filter."))
+                if unlocated:
+                    st.caption(_map_text(T, "map_unlocated", "{n} scans have no mapped location.", n=unlocated))
+                return
+
+            aggregate = aggregate_hotspots(located)
+            metric_1, metric_2, metric_3, metric_4 = st.columns(4)
+            metric_1.metric(_map_text(T, "kpi_cases", "Cases"), f"{len(located):,}")
+            metric_2.metric(_map_text(T, "kpi_hotspots", "Hotspots"), f"{len(aggregate):,}")
+            metric_3.metric(
+                _map_text(T, "kpi_avg_sev", "Avg severity"),
+                f"{located['severity'].mean():.1f}%",
+            )
+            metric_4.metric(
+                _map_text(T, "kpi_dominant", "Dominant problem"),
+                str(located["disease"].mode().iloc[0]),
+            )
+            render_map_legend(
+                T, show_heat=show_heat, show_overlay=show_overlay, overlay_style=overlay_style
+            )
+            span_km = map_span_km(aggregate["lat"], aggregate["lon"])
+            base_radius_m = float(np.clip(span_km * 1000 * 0.012, 1200, 35000))
+            layer_data = hotspot_layer_data(aggregate, T, base_radius_m)
+            columns_3d = show_overlay and overlay_style == "columns"
+            view_state = compute_view_state(
+                aggregate["lat"], aggregate["lon"],
+                pitch=45.0 if columns_3d else 0.0,
+                single_point_zoom=9.0 if bool(aggregate["gps"].all()) else 7.0,
+            )
+            layers = build_map_layers(
+                layer_data,
+                show_heat=show_heat,
+                show_overlay=show_overlay,
+                overlay_style=overlay_style,
+                base_radius_m=base_radius_m,
+                span_km=span_km,
+            )
+            st.pydeck_chart(
+                pdk.Deck(
+                    layers=layers,
+                    initial_view_state=view_state,
+                    map_provider="carto",
+                    map_style=MAP_STYLE,
+                    tooltip=map_tooltip(T) if show_overlay else False,
+                ),
+                use_container_width=True,
+            )
+            if not show_overlay:
+                st.caption(_map_text(T, "map_hover_hint", ""))
+            if unlocated:
+                st.caption(_map_text(
+                    T, "map_unlocated", "{n} scans have no mapped location.", n=unlocated
+                ))
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(f"### {_map_text(T, 'map_hotspot_table', 'Hotspot summary')}")
+        table = pd.DataFrame({
+            _map_text(T, "col_hub", "Hub"): [
+                str(hub) + (f" · {_map_text(T, 'tt_field_cluster', 'field cluster')}" if has_gps else "")
+                for hub, has_gps in zip(aggregate["hub_region"], aggregate["gps"])
+            ],
+            _map_text(T, "col_cases", "Cases"): aggregate["cases"],
+            _map_text(T, "col_likely", "Likely"): aggregate["likely"],
+            _map_text(T, "col_avg_sev", "Avg sev (%)"): aggregate["avg_sev"].round(1),
+            _map_text(T, "col_max_sev", "Max sev (%)"): aggregate["max_sev"].round(1),
+            _map_text(T, "col_dominant", "Dominant"): aggregate["dominant"],
+            _map_text(T, "col_last", "Last report"): aggregate["last_seen"].dt.strftime("%Y-%m-%d"),
+        })
+        st.dataframe(table, hide_index=True, use_container_width=True)
+        raw_title = _map_text(T, "map_raw_scans", "Raw scans ({n})", n=len(filtered))
+        with st.expander(raw_title):
+            raw = filtered.sort_values("ts", ascending=False).head(500)
+            st.dataframe(pd.DataFrame({
+                _map_text(T, "col_time", "Time"): raw["timestamp"],
+                _map_text(T, "col_hub", "Hub"): raw["hub_region"],
+                _map_text(T, "col_crop", "Crop"): raw["crop"],
+                _map_text(T, "col_disease", "Disease"): raw["disease"],
+                _map_text(T, "col_sev_pct", "Sev (%)"): raw["severity"].round(1),
+                _map_text(T, "col_status", "Status"): raw["status"],
+            }), hide_index=True, use_container_width=True)
+
+    outbreak_map()
+
+
 # ==========================================
 # VIEW 1.5: FARMER ACCOUNT & HISTORY PORTAL
 # ==========================================
@@ -2818,17 +3779,9 @@ if app_mode == T["nav_acc"]:
 # VIEW 1: B2G EPIDEMIOLOGICAL HEATMAP DASHBOARD
 # ==========================================
 elif app_mode == T["nav_map"]:
-    st.title(T["map_title"])
-    st.markdown(f"<p style='font-size: 1.2rem; font-weight: 500;'>{T['map_subtitle']}</p>", unsafe_allow_html=True)
-    st.markdown("<br>", unsafe_allow_html=True)
+    ctx = types.SimpleNamespace(T=T, language=language)
+    view_map(ctx)
 
-    with st.container(border=True):
-        st.markdown(f"### {T['map_cluster_header']}")
-        epi_render_heatmap(T)
-
-# ==========================================
-# VIEW 3: AGRITECH VIRTUAL AI ASSISTANT
-# ==========================================
 elif app_mode == T["nav_ai"]:
     st.title(T["ai_title"])
     st.markdown(f"<p style='font-size: 1.2rem; font-weight: 500;'>{T['ai_subtitle']} ({selected_hub_label})</p>", unsafe_allow_html=True)
@@ -2837,6 +3790,20 @@ elif app_mode == T["nav_ai"]:
     with st.container(border=True):
         st.markdown(f"### {T['chat_header']}")
         st.info(T["chat_info"].format(hub=selected_hub_label, lang=language))
+        disease_advisory = current_disease_advisory(language, selected_hub_label)
+        render_current_disease_advisory(language, selected_hub_label)
+        prior_chat_guide = st.session_state.get("last_chat_guide")
+        if prior_chat_guide and (
+            not disease_advisory
+            or prior_chat_guide[0] != st.session_state.get("last_disease_guide")
+        ):
+            render_chat_disease_advisory(build_disease_advisory(
+                prior_chat_guide[0],
+                prior_chat_guide[1],
+                language,
+                prior_chat_guide[2],
+                selected_hub_label,
+            ))
 
         if "messages" not in st.session_state:
             st.session_state.messages = [
@@ -2851,23 +3818,41 @@ elif app_mode == T["nav_ai"]:
                 st.markdown(message["content"])
 
         if prompt := st.chat_input(T["chat_input_ph"]):
-            st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
-            prompt_lower = prompt.lower()
-            if "maize" in prompt_lower or "mahindi" in prompt_lower:
-                bot_reply = f"For maize crops in {selected_hub_label}, monitor closely for Fall Armyworm or Maize Lethal Necrosis. For early stage symptoms (Stage 1-2), apply recommended foliar insecticides or certified bio-pesticides. Check our verified local provider **{active_zone_data['resources'][0]['name']}** ({active_zone_data['resources'][0]['contact']}) for inputs."
-            elif "blight" in prompt_lower or "fungus" in prompt_lower or "rot" in prompt_lower:
-                bot_reply = f"Fungal blights thrive under current conditions in {selected_hub_label} (Temp: {active_zone_data['temp']}°C, Humidity: {active_zone_data['humidity']}%). Ensure proper spacing, avoid overhead irrigation, and apply a broad-spectrum copper fungicide if tissue damage exceeds 20%."
-            elif "hello" in prompt_lower or "hi" in prompt_lower:
-                bot_reply = f"Greetings! As your agritech consultant for {selected_hub_label}, I'm ready to assist with crop diagnostics, disease prevention, and extension coordination."
+            prompt_advisory = disease_advisory_for_prompt(
+                prompt, language, selected_hub_label
+            ) or disease_advisory
+            if prompt_advisory:
+                st.session_state["last_chat_guide"] = (
+                    prompt_advisory["guide_key"],
+                    prompt_advisory["crop_name"],
+                    prompt_advisory["severity_stage"],
+                )
             else:
-                bot_reply = f"That is a vital agronomic inquiry for {selected_hub_label}. Based on current micro-climate risk ({active_zone_data['risk']}), I recommend inspecting root zones and consulting local extension services at **{active_zone_data['resources'][0]['name']}** via `{active_zone_data['resources'][0]['contact']}`."
+                st.session_state["last_chat_guide"] = None
 
-            with st.chat_message("assistant"):
-                st.markdown(bot_reply)
-            st.session_state.messages.append({"role": "assistant", "content": bot_reply})
+            try:
+                with st.spinner("CropGuard is preparing practical advice..."):
+                    bot_reply = generate_cropguard_reply(
+                        prompt,
+                        st.session_state.messages,
+                        selected_hub_label,
+                        active_zone_data,
+                        language,
+                        format_disease_advisory_context(prompt_advisory),
+                    )
+            except (requests.RequestException, RuntimeError) as error:
+                st.error(f"Could not get a CropGuard answer: {error}")
+            else:
+                st.session_state.messages.extend([
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": bot_reply},
+                ])
+                with st.chat_message("assistant"):
+                    st.markdown(bot_reply)
+                    render_chat_disease_advisory(prompt_advisory)
 
 # ==========================================
 # VIEW 4: REGIONAL FARMER COMMUNITY FORUM
@@ -3031,6 +4016,8 @@ else:
             st.session_state['last_language'] = language
         if 'selected_crop' not in st.session_state:
             st.session_state['selected_crop'] = None
+        if 'last_consensus_report' not in st.session_state:
+            st.session_state['last_consensus_report'] = None
 
         left_col, right_col = st.columns(2, gap="large")
 
@@ -3066,6 +4053,7 @@ else:
                         st.session_state["last_diagnosis_notice"] = None
                         st.session_state["last_diagnosis_available"] = False
                         st.session_state["last_disease_guide"] = None
+                        st.session_state["last_consensus_report"] = None
                     image = ImageOps.exif_transpose(Image.open(uploaded_file))
                     image_quality = assess_image_quality(image)
                     st.image(image, caption=f"Field Sample Preview ({selected_crop.split(' ')[0]})", width="stretch")
@@ -3105,7 +4093,7 @@ else:
             opacity: 1 !important;
             transition: none !important;
         }}
-        [data-testid="stStatusWidget"], [data-testid="stSkeleton"] {{
+        [data-testid="stSkeleton"] {{
             display: none !important;
         }}
 
@@ -3200,22 +4188,32 @@ else:
             st.session_state['last_diagnosis_notice'] = None
             st.session_state['last_diagnosis_available'] = False
             st.session_state['last_language'] = language
+            st.session_state['last_consensus_report'] = None
 
         if analyze_triggered and uploaded_file is not None:
             st.session_state['analysis_done'] = True
             st.session_state['selected_crop'] = selected_crop
-            class_indices = supported_class_indices(selected_crop)
-            diagnosis_available = bool(class_indices)
-            is_healthy_prediction = False
-            epidemiological_label = None
-            diagnosis_guide_key = None
-            if not diagnosis_available:
-                predicted_label = T["unsupported_crop_msg"]
-                confidence_val = 0.0
-                confidence_margin_val = 0.0
-                stage, pct = "Not available", 0.0
-                diagnosis_notice = T["unsupported_crop_msg"]
-            else:
+            upload_bytes = uploaded_file.getvalue()
+
+            def infer_local_vision():
+                class_indices = supported_class_indices(selected_crop)
+                if not class_indices:
+                    return {
+                        "available": False,
+                        "detected_crop": selected_crop,
+                        "primary_diagnosis": "unsupported crop",
+                        "metadata": {
+                            "diagnosis_available": False,
+                            "predicted_label": T["unsupported_crop_msg"],
+                            "confidence_val": 0.0,
+                            "confidence_margin_val": 0.0,
+                            "severity_stage": "Not available",
+                            "severity_pct": 0.0,
+                            "diagnosis_notice": T["unsupported_crop_msg"],
+                            "disease_guide_key": None,
+                            "epidemiological_label": None,
+                        },
+                    }
                 input_meta = session.get_inputs()[0]
                 input_shape = input_meta.shape
                 if len(input_shape) != 4:
@@ -3243,9 +4241,7 @@ else:
                     )
                 if not np.all(np.isfinite(prediction_scores)):
                     raise ValueError("Model returned non-finite classification scores.")
-                if np.all((prediction_scores >= 0) & (prediction_scores <= 1)) and np.isclose(
-                    np.sum(prediction_scores), 1.0, atol=1e-3
-                ):
+                if np.all((prediction_scores >= 0) & (prediction_scores <= 1)) and np.isclose(np.sum(prediction_scores), 1.0, atol=1e-3):
                     probabilities = prediction_scores
                 else:
                     shifted_scores = prediction_scores - np.max(prediction_scores)
@@ -3264,7 +4260,13 @@ else:
                 )
                 crop_label, disease_label = split_plant_disease_label(plant_disease_labels[predicted_index])
                 is_healthy_prediction = disease_label is None
-                if confidence_val < 55.0:
+                epidemiological_label = None
+                diagnosis_guide_key = None
+                diagnosis_available = True
+                if (
+                    confidence_val < MODEL_SCREENING_MIN_SCORE_PCT
+                    or confidence_margin_val < MODEL_SCREENING_MIN_MARGIN_PCT
+                ):
                     predicted_label = T["low_confidence_msg"]
                     diagnosis_available = False
                     stage, pct = "Not available", 0.0
@@ -3283,6 +4285,79 @@ else:
                     )
                     stage, pct = analyze_leaf_severity(image)
                     diagnosis_notice = None
+
+                return {
+                    "available": True,
+                    "detected_crop": crop_label,
+                    "primary_diagnosis": "healthy" if is_healthy_prediction else disease_label,
+                    "confidence_score": confidence_val / 100.0,
+                    "confidence_margin": confidence_margin_val / 100.0,
+                    "health_status": "healthy" if is_healthy_prediction else "diseased",
+                    "metadata": {
+                        "diagnosis_available": diagnosis_available,
+                        "predicted_label": predicted_label,
+                        "confidence_val": confidence_val,
+                        "confidence_margin_val": confidence_margin_val,
+                        "severity_stage": stage,
+                        "severity_pct": pct,
+                        "diagnosis_notice": diagnosis_notice,
+                        "disease_guide_key": diagnosis_guide_key,
+                        "epidemiological_label": epidemiological_label,
+                    },
+                }
+
+            consensus_config = _consensus_configuration()
+            try:
+                with st.status("Starting parallel diagnostic agents...", expanded=True) as consensus_status:
+                    def update_consensus_status(stage_name, message):
+                        consensus_status.update(
+                            label=f"{stage_name.replace('_', ' ').title()}: {message}",
+                            state="running",
+                            expanded=True,
+                        )
+
+                    report = cropguard_consensus.run_consensus(
+                        image_bytes=upload_bytes,
+                        mime_type=uploaded_file.type or "image/jpeg",
+                        selected_crop=selected_crop,
+                        region=selected_hub_label,
+                        language=language,
+                        local_vision=infer_local_vision,
+                        config=consensus_config,
+                        progress=update_consensus_status,
+                    )
+                    consensus_status.update(
+                        label="Diagnostic screening consensus complete.",
+                        state="complete",
+                        expanded=False,
+                    )
+                st.session_state["last_consensus_report"] = report.to_dict()
+                local_metadata = report.local_vision.metadata
+            except Exception as error:
+                st.error(f"Consensus engine failed; attempting local ONNX screening only: {error}")
+                try:
+                    local_output = infer_local_vision()
+                    local_metadata = local_output.get("metadata", {})
+                except Exception as local_error:
+                    st.error(f"Local ONNX screening also failed: {local_error}")
+                    local_metadata = {}
+
+            diagnosis_available = bool(local_metadata.get("diagnosis_available", False))
+            predicted_label = local_metadata.get("predicted_label", T["unsupported_crop_msg"])
+            confidence_val = float(local_metadata.get("confidence_val", 0.0))
+            confidence_margin_val = float(local_metadata.get("confidence_margin_val", 0.0))
+            stage = local_metadata.get("severity_stage", "Not available")
+            pct = float(local_metadata.get("severity_pct", 0.0))
+            diagnosis_notice = local_metadata.get("diagnosis_notice", T["unsupported_crop_msg"])
+            diagnosis_guide_key = local_metadata.get("disease_guide_key")
+            epidemiological_label = local_metadata.get("epidemiological_label")
+            is_healthy_prediction = (
+                local_metadata.get("health_status") == "healthy"
+                or (
+                    diagnosis_available
+                    and diagnosis_guide_key == "healthy"
+                )
+            )
 
             st.session_state['last_prediction'] = predicted_label
             st.session_state['last_confidence'] = confidence_val
@@ -3320,6 +4395,10 @@ else:
             st.markdown("<div id='tour-target-results'></div>", unsafe_allow_html=True)
             with st.container(border=True):
                 st.markdown(f"### 📊 2. {T['results_header']}")
+                render_consensus_report(
+                    st.session_state.get("last_consensus_report"),
+                    language,
+                )
                 
                 if st.session_state['analysis_done']:
                     raw_label = st.session_state['last_prediction']
@@ -3353,7 +4432,28 @@ else:
                             chosen_crop,
                             language,
                             sev_stage,
+                            selected_hub_label,
                         )
+                        if not st.session_state.get("last_disease_guide"):
+                            st.info(T.get(
+                                "disease_guide_unavailable",
+                                "No exact crop-compatible knowledge-base match was found for this model class.",
+                            ))
+                    else:
+                        consensus_data = st.session_state.get("last_consensus_report") or {}
+                        consensus_key = consensus_data.get("disease_key")
+                        consensus_guide_key = find_disease_guide_key(
+                            chosen_crop,
+                            consensus_data.get("primary_diagnosis", ""),
+                        )
+                        if consensus_key and consensus_key == consensus_guide_key:
+                            render_disease_guide(
+                                consensus_key,
+                                chosen_crop,
+                                language,
+                                sev_stage or "",
+                                selected_hub_label,
+                            )
 
                     if not st.session_state.get('last_diagnosis_notice'):
                         st.markdown("---")
