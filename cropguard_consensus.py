@@ -25,7 +25,14 @@ LocalVision = Callable[[], Mapping[str, Any]]
 ProgressCallback = Callable[[str, str], None]
 
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_MODEL_FALLBACKS = (
+    "gemini-3.8-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+)
 DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 MAX_SEARCH_RESULTS = 5
@@ -220,6 +227,17 @@ def _request_json(
     return payload
 
 
+def _candidate_gemini_models(requested_model: str) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for model_name in [requested_model.strip(), *GEMINI_MODEL_FALLBACKS]:
+        if not model_name or model_name in seen:
+            continue
+        seen.add(model_name)
+        ordered.append(model_name)
+    return ordered
+
+
 def _gemini_vision(
     image_bytes: bytes,
     mime_type: str,
@@ -251,35 +269,45 @@ laboratory diagnosis. Reply only as JSON with exactly these fields:
 Confidence is a subjective visual screening score, not a calibrated probability.
 Write symptom descriptions in {language}.
 """
-    payload = _request_json(
-        "POST",
-        GEMINI_API_URL.format(model=model),
-        timeout=float(config.get("AGENT_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)),
-        headers={"x-goog-api-key": api_key},
-        json={
-            "contents": [{
-                "role": "user",
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {
-                        "mime_type": mime_type,
-                        "data": base64.b64encode(image_bytes).decode("ascii"),
-                    }},
-                ],
-            }],
-            "generationConfig": {
-                "temperature": 0.1,
-                "responseMimeType": "application/json",
-                "maxOutputTokens": 900,
-            },
-        },
-    )
-    try:
-        text = payload["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError, TypeError) as error:
-        raise AgentError("Gemini did not return a vision assessment.") from error
-    fields = _validate_vision_payload(_parse_json_object(text, "Gemini"))
-    return VisionResult(*fields, provider=model)
+    last_error: AgentError | None = None
+    for candidate_model in _candidate_gemini_models(model):
+        try:
+            payload = _request_json(
+                "POST",
+                GEMINI_API_URL.format(model=candidate_model),
+                timeout=float(config.get("AGENT_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)),
+                headers={"x-goog-api-key": api_key},
+                json={
+                    "contents": [{
+                        "role": "user",
+                        "parts": [
+                            {"text": prompt},
+                            {"inline_data": {
+                                "mime_type": mime_type,
+                                "data": base64.b64encode(image_bytes).decode("ascii"),
+                            }},
+                        ],
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.1,
+                        "responseMimeType": "application/json",
+                        "maxOutputTokens": 900,
+                    },
+                },
+            )
+        except AgentError as error:
+            last_error = error
+            continue
+        try:
+            text = payload["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise AgentError("Gemini did not return a vision assessment.") from error
+        fields = _validate_vision_payload(_parse_json_object(text, "Gemini"))
+        return VisionResult(*fields, provider=candidate_model)
+
+    if last_error is not None:
+        raise AgentError(f"Gemini model fallback failed. Tried: {', '.join(_candidate_gemini_models(model))}. Last error: {last_error}")
+    raise AgentError("Gemini did not return a vision assessment.")
 
 
 def _local_fallback(local_vision: LocalVision) -> LocalResult:

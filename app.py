@@ -3027,19 +3027,19 @@ else:
 
 def generate_cropguard_reply(prompt, messages, hub_label, zone_data, language,
                              knowledge_context=""):
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         try:
-            api_key = st.secrets.get("GEMINI_API_KEY", "").strip()
-        except FileNotFoundError:
+            api_key = st.secrets.get("OPENAI_API_KEY", "").strip()
+        except (FileNotFoundError, KeyError, RuntimeError):
             api_key = ""
     if not api_key:
         raise RuntimeError(
-            "CropGuard chat needs a Gemini API key. Set GEMINI_API_KEY as an environment "
-            "variable or add GEMINI_API_KEY to your Streamlit secrets."
+            "CropGuard chat needs an OpenAI API key. Set OPENAI_API_KEY as an environment "
+            "variable or add OPENAI_API_KEY to your Streamlit secrets."
         )
 
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    model = os.environ.get("OPENAI_MODEL", "").strip() or "gpt-4o-mini"
     system_instruction = f"""
 You are CropGuard AI, an expert, practical, and empathetic agricultural assistant for farmers,
 extension workers, and agricultural researchers worldwide. Give accurate, actionable,
@@ -3077,25 +3077,27 @@ registration claims omitted from it:
 """
 
     conversation = messages[1:] if messages and messages[0].get("role") == "assistant" else messages
-    contents = [
+    api_messages = [
+        {"role": "system", "content": system_instruction},
+    ] + [
         {
-            "role": "model" if message["role"] == "assistant" else "user",
-            "parts": [{"text": message["content"]}],
+            "role": message["role"],
+            "content": message["content"],
         }
         for message in conversation[-12:]
         if message.get("role") in {"user", "assistant"} and message.get("content")
     ]
-    contents.append({"role": "user", "parts": [{"text": prompt}]})
-
+    api_messages.append({"role": "user", "content": prompt})
     response = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        headers={"x-goog-api-key": api_key},
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
         json={
-            "systemInstruction": {"parts": [{"text": system_instruction}]},
-            "contents": contents,
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 900},
+            "model": model,
+            "messages": api_messages,
+            "temperature": 0.4,
+            "max_tokens": 900,
         },
-        timeout=(10, 60),
+        timeout=(5, 30),
     )
     if not response.ok:
         try:
@@ -3103,7 +3105,7 @@ registration claims omitted from it:
             detail = error_data.get("error", {}).get("message", "")
         except (ValueError, AttributeError):
             detail = ""
-        message = f"Gemini API returned HTTP {response.status_code}."
+        message = f"OpenAI API returned HTTP {response.status_code}."
         if detail:
             message += f" {detail}"
         raise RuntimeError(message)
@@ -3111,27 +3113,19 @@ registration claims omitted from it:
     try:
         result = response.json()
     except ValueError as error:
-        raise RuntimeError("Gemini returned an invalid response. Please try again.") from error
+        raise RuntimeError("OpenAI returned an invalid response. Please try again.") from error
 
     if not isinstance(result, dict):
-        raise RuntimeError("Gemini returned an invalid response. Please try again.")
-    candidates = result.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        raise RuntimeError("Gemini did not return an answer. Please rephrase your question and try again.")
-    candidate = candidates[0]
-    if not isinstance(candidate, dict):
-        raise RuntimeError("Gemini returned an invalid answer. Please try again.")
-    content = candidate.get("content")
-    parts = content.get("parts") if isinstance(content, dict) else None
-    if not isinstance(parts, list):
-        raise RuntimeError("Gemini did not return a text answer. Please try again.")
-    reply = "\n".join(
-        part["text"] for part in parts
-        if isinstance(part, dict) and isinstance(part.get("text"), str)
-    ).strip()
-    if not reply:
-        raise RuntimeError("Gemini returned an empty answer. Please try again.")
-    return reply
+        raise RuntimeError("OpenAI returned an invalid response. Please try again.")
+    choices = result.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("OpenAI did not return an answer. Please rephrase your question and try again.")
+    choice = choices[0]
+    message = choice.get("message") if isinstance(choice, dict) else None
+    reply = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(reply, str) or not reply.strip():
+        raise RuntimeError("OpenAI did not return a text answer. Please try again.")
+    return reply.strip()
 
 
 # ===========================================================================
