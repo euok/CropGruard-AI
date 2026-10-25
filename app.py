@@ -14,6 +14,7 @@ import os
 import unicodedata
 import tempfile
 import sys
+import importlib
 import types
 import hashlib
 import io
@@ -588,11 +589,15 @@ TRANSLATIONS = {
         "no_posts_msg": "No community posts yet in {hub}. Be the first farmer to share an update!",
         "diag_title": "🌱 CropGuard AI",
         "diag_subtitle": "Advanced Computer Vision Agritech Assistant (Global Edition)",
-        "tour_btn": "How to use CropGuard",
+        "tour_btn": "Replay guided tour",
         "crop_select_prompt": "Select Target Crop Type (Hub Priority):",
         "crop_select_header": "🌾 Select Crop Context",
         "upload_header": "📥 1.",
         "upload_label_text": "Upload or snap an image of an affected crop leaf...",
+        "quality_integrity_header": "Quality & integrity checks",
+        "leaf_upload_help": "Use a clear, well-lit photo of one affected leaf.",
+        "image_open_error": "Could not open or assess this image: {error}",
+        "scan_another_btn": "🔄 Scan Another Leaf",
         "analyze_btn": "Run Diagnostic Analysis",
         "results_header": "Diagnostic Results",
         "treatment_header": "Agritech Management & Regional Resource Directory",
@@ -616,7 +621,7 @@ TRANSLATIONS = {
         "quality_review_title": "Image quality may reduce model reliability.",
         "quality_metrics": "Quality check: {width}×{height}px · sharpness {sharpness:.1f} · brightness {brightness:.0f}/255 · contrast {contrast:.1f}.",
         "quality_confidence_caution": "Image-quality checks are heuristic, not a trained quality model. The model score is uncalibrated and is not a probability of a correct diagnosis.",
-        "hub_support_info": "Showing verified agricultural extension services and input providers matched to your selected hub:",
+        "hub_support_info": "Regional resources are selected automatically using your GPS-matched hub when location access is available; otherwise, the currently selected region is used.",
         "diagnostic_empty_prompt": "👈 Select your region, pick your crop context, upload an image on the left, and click Run Diagnostic Analysis to view insights here.",
         "footer_text": "CropGuard AI — National Phytosanitary Surveillance & Global Agronomic Network"
     },
@@ -707,11 +712,15 @@ TRANSLATIONS = {
         "no_posts_msg": "Bado hakuna machapisho ya jamii katika {hub}. Kuwa mkulima wa kwanza kushiriki!",
         "diag_title": "🌱 CropGuard AI",
         "diag_subtitle": "Msaidizi wa Juu wa Maono ya Kompyuta wa Kilimo (Toleo la Dunia)",
-        "tour_btn": "Jinsi ya kutumia CropGuard",
+        "tour_btn": "Rudia ziara elekezi",
         "crop_select_prompt": "Chagua Aina ya Mmea unaochunguzwa:",
         "crop_select_header": "🌾 Chagua Muktadha wa Mmea",
         "upload_header": "📥 1.",
         "upload_label_text": "Pakia au piga picha ya jani la mmea lenye maambukizi...",
+        "quality_integrity_header": "Ukaguzi wa ubora na uadilifu",
+        "leaf_upload_help": "Tumia picha iliyo wazi na yenye mwanga mzuri ya jani lililoathirika.",
+        "image_open_error": "Picha hii haikuweza kufunguliwa au kukaguliwa: {error}",
+        "scan_another_btn": "🔄 Chunguza Jani Lingine",
         "analyze_btn": "Fanya Uchunguzi wa AI",
         "results_header": "Matokeo ya Uchunguzi",
         "treatment_header": "Usimamizi wa Kilimo na Saraka ya Rasilimali za Kanda",
@@ -735,7 +744,7 @@ TRANSLATIONS = {
         "quality_review_title": "Ubora wa picha unaweza kupunguza uaminifu wa modeli.",
         "quality_metrics": "Ukaguzi wa ubora: pikseli {width}×{height} · ukali {sharpness:.1f} · mwangaza {brightness:.0f}/255 · utofauti {contrast:.1f}.",
         "quality_confidence_caution": "Ukaguzi wa ubora wa picha ni makadirio, si modeli iliyofunzwa. Alama ya modeli haijathibitishwa na si uwezekano wa utambuzi kuwa sahihi.",
-        "hub_support_info": "Inaonyesha huduma zilizothibitishwa za ushauri wa kilimo na wauzaji wa pembejeo katika kituo chako:",
+        "hub_support_info": "Rasilimali za eneo huchaguliwa kiotomatiki kwa kutumia kituo kilicholinganishwa na GPS yako inapowezekana; vinginevyo, eneo lililochaguliwa ndilo hutumika.",
         "diagnostic_empty_prompt": "👈 Chagua eneo lako, chagua aina ya mmea, pakia picha upande wa kushoto, na ubonyeze Fanya Uchunguzi wa AI ili kuona matokeo hapa.",
         "footer_text": "CropGuard AI — Mtandao wa Kitaifa wa Ufuatiliaji wa Magonjwa ya Mimea na Kilimo Duniani"
     },
@@ -826,11 +835,15 @@ TRANSLATIONS = {
         "no_posts_msg": "Aucune publication pour le moment à {hub}. Soyez le premier à partager !",
         "diag_title": "🌱 CropGuard AI",
         "diag_subtitle": "Assistant Agritech Avancé par Vision par Ordinateur (Édition Mondiale)",
-        "tour_btn": "Comment utiliser CropGuard",
+        "tour_btn": "Revoir la visite guidée",
         "crop_select_prompt": "Sélectionnez le type de culture cible :",
         "crop_select_header": "🌾 Contexte de la Culture",
         "upload_header": "📥 1.",
         "upload_label_text": "Téléchargez ou prenez une photo d'une feuille de culture affectée...",
+        "quality_integrity_header": "Contrôles de qualité et d’intégrité",
+        "leaf_upload_help": "Utilisez une photo nette et bien éclairée d’une feuille affectée.",
+        "image_open_error": "Impossible d’ouvrir ou d’évaluer cette image : {error}",
+        "scan_another_btn": "🔄 Analyser une autre feuille",
         "analyze_btn": "Lancer l'Analyse Diagnostique",
         "results_header": "Résultats du Diagnostic",
         "treatment_header": "Gestion Agronomique & Répertoire Régional",
@@ -854,7 +867,7 @@ TRANSLATIONS = {
         "quality_review_title": "La qualité de l’image peut réduire la fiabilité du modèle.",
         "quality_metrics": "Contrôle qualité : {width}×{height}px · netteté {sharpness:.1f} · luminosité {brightness:.0f}/255 · contraste {contrast:.1f}.",
         "quality_confidence_caution": "Le contrôle qualité est heuristique, et non un modèle entraîné. Le score du modèle n’est pas calibré et ne représente pas la probabilité d’un diagnostic correct.",
-        "hub_support_info": "Affichage des services de vulgarisation agricole vérifiés et des fournisseurs d'intrants correspondant à votre hub :",
+        "hub_support_info": "Les ressources régionales sont sélectionnées automatiquement selon le hub associé au GPS lorsque l’accès à la position est disponible ; sinon, la région sélectionnée est utilisée.",
         "diagnostic_empty_prompt": "👈 Sélectionnez votre région, choisissez votre culture, téléchargez une image sur la gauche et cliquez sur Lancer l'Analyse Diagnostique pour afficher les résultats ici.",
         "footer_text": "CropGuard AI — Network National de Surveillance Phytosanitaire & Réseau Agronomique Mondial"
     }
@@ -1533,7 +1546,7 @@ def _epi_legend(T):
     s2 = T.get("sev_2", "🟠 Stage 2: Moderate (40% - 70% severity)")
     s3 = T.get("sev_3", "🔴 Stage 3: Terminal (>70% severity)")
     sev_note = T.get("sev_note", "* Circle size scales with infection severity")
-    st.markdown(f"""
+    st.markdown("""
     <style>
     .severity-key-card {{
         background-color: #1E4620 !important; border: 2px solid #76FF03 !important;
@@ -1670,8 +1683,9 @@ MODEL_SCREENING_MIN_MARGIN_PCT = 5.0
 
 def _consensus_configuration():
     keys = (
-        "GEMINI_API_KEY", "GEMINI_VISION_MODEL", "OLLAMA_BASE_URL", "OLLAMA_MODEL",
-        "GOOGLE_CSE_API_KEY", "GOOGLE_CSE_ID", "AGENT_TIMEOUT_SECONDS",
+        "GEMINI_API_KEY", "GEMINI_CHAT_MODEL",
+        "OLLAMA_BASE_URL", "OLLAMA_MODEL",
+        "SERPER_API_KEY", "AGENT_TIMEOUT_SECONDS",
     )
     configuration = {
         key: os.environ.get(key, "").strip()
@@ -1680,7 +1694,7 @@ def _consensus_configuration():
     try:
         for key in keys:
             value = st.secrets.get(key)
-            if isinstance(value, str) and value.strip():
+            if not configuration[key] and isinstance(value, str) and value.strip():
                 configuration[key] = value.strip()
     except (FileNotFoundError, KeyError, RuntimeError):
         pass
@@ -1695,7 +1709,7 @@ def _consensus_configuration():
     return configuration
 
 
-def render_consensus_report(report, language):
+def render_consensus_report(report, language, search_config=None):
     if not report:
         return
 
@@ -1704,6 +1718,8 @@ def render_consensus_report(report, language):
             "title": "🤝 Multi-agent screening consensus",
             "confidence": "Consensus index (not calibrated)",
             "agreement": "Agent agreement",
+            "local_differs": "Secondary local cross-check available",
+            "crosscheck_details": "Secondary cross-check details",
             "health": "Health status",
             "vision": "Vision assessment",
             "crosscheck": "Secondary cross-check",
@@ -1714,12 +1730,19 @@ def render_consensus_report(report, language):
             "no_symptoms": "No specific visual symptoms returned.",
             "no_alternatives": "No alternatives were returned.",
             "no_sources": "Live search is not configured or returned no usable sources.",
+            "search_error": "Serper search error details",
+            "search_not_requested": "Regional search has not been requested.",
+            "search_confirm": "I want to run a regional web search (uses Serper credits).",
+            "search_submit": "Run regional search",
             "notes": "Screening notes",
+            "vision_error": "Image screening was unavailable; a local fallback was used",
         },
         "Kiswahili": {
             "title": "🤝 Makubaliano ya uchunguzi wa mawakala wengi",
             "confidence": "Kielezo cha makubaliano (hakijathibitishwa)",
             "agreement": "Makubaliano ya mawakala",
+            "local_differs": "Ukaguzi wa pili wa ndani unapatikana",
+            "crosscheck_details": "Maelezo ya ukaguzi wa pili",
             "health": "Hali ya afya",
             "vision": "Tathmini ya picha",
             "crosscheck": "Ukaguzi wa pili",
@@ -1730,12 +1753,19 @@ def render_consensus_report(report, language):
             "no_symptoms": "Hakuna dalili maalum za picha zilizoripotiwa.",
             "no_alternatives": "Hakuna magonjwa mbadala yaliyoripotiwa.",
             "no_sources": "Utafutaji wa moja kwa moja haujawekwa au haujapata vyanzo.",
+            "search_error": "Maelezo ya hitilafu ya utafutaji wa Serper",
+            "search_not_requested": "Utafutaji wa eneo bado haujaombwa.",
+            "search_confirm": "Nataka kutafuta kwenye wavuti wa eneo (hutumia salio la Serper).",
+            "search_submit": "Anzisha utafutaji wa eneo",
             "notes": "Maelezo ya uchunguzi",
+            "vision_error": "Uchunguzi wa picha haukupatikana; mfumo wa ndani umetumika",
         },
         "French": {
             "title": "🤝 Consensus de dépistage multi-agents",
             "confidence": "Indice de consensus (non calibré)",
             "agreement": "Accord des agents",
+            "local_differs": "Vérification locale secondaire disponible",
+            "crosscheck_details": "Détails de la vérification secondaire",
             "health": "État sanitaire",
             "vision": "Évaluation visuelle",
             "crosscheck": "Vérification secondaire",
@@ -1746,22 +1776,50 @@ def render_consensus_report(report, language):
             "no_symptoms": "Aucun symptôme visuel précis n'a été rapporté.",
             "no_alternatives": "Aucun diagnostic alternatif n'a été rapporté.",
             "no_sources": "La recherche en direct n'est pas configurée ou n'a fourni aucune source.",
+            "search_error": "Détails de l'erreur de recherche Serper",
+            "search_not_requested": "La recherche régionale n'a pas été demandée.",
+            "search_confirm": "Je souhaite lancer une recherche régionale (utilise des crédits Serper).",
+            "search_submit": "Lancer la recherche régionale",
             "notes": "Notes de dépistage",
+            "vision_error": "L’analyse de l’image était indisponible ; un modèle local a été utilisé",
         },
     }
     text = labels.get(language, labels["English"])
     with st.expander(text["title"], expanded=True):
-        vision_name = report["vision"].get("provider") or text["not_configured"]
-        reasoner_name = report["reasoning"].get("provider") or text["not_configured"]
-        metric1, metric2, metric3 = st.columns(3)
-        metric1.metric(
-            text["confidence"],
-            f"{report['consensus_confidence_index']:.1f}%",
+        vision_error = report.get("vision", {}).get("error")
+        if vision_error:
+            st.warning(text["vision_error"])
+        vision_name = text["vision"]
+        reasoner_name = text["crosscheck"]
+        agreement_text = str(report.get("agreement") or "")
+        local_disagreement = "disagree" in agreement_text.casefold()
+        agreement_display = (
+            agreement_text.replace("Gemini", "image assessment")
+            .replace("gemini", "image assessment")
         )
-        metric2.metric(text["health"], report["health_status"].replace("_", " ").title())
-        metric3.metric(text["agreement"], report["agreement"])
+        metrics = (
+            (text["confidence"], f"{report['consensus_confidence_index']:.1f}%"),
+            (text["health"], report["health_status"].replace("_", " ").title()),
+        )
+        if not local_disagreement:
+            metrics += ((text["agreement"], agreement_display),)
+        metric_cards = "".join(
+            "<div style='flex:1 1 180px; min-width:0;'>"
+            f"<div style='font-size:0.85rem; line-height:1.4; overflow-wrap:anywhere;'>"
+            f"{html.escape(str(label))}</div>"
+            f"<div style='font-size:1.5rem; font-weight:700; line-height:1.3; "
+            f"overflow-wrap:anywhere; white-space:normal;'>{html.escape(str(value))}</div>"
+            "</div>"
+            for label, value in metrics
+        )
+        st.markdown(
+            f"<div style='display:flex; flex-wrap:wrap; gap:1rem;'>{metric_cards}</div>",
+            unsafe_allow_html=True,
+        )
 
         st.markdown(f"**{report['detected_crop']} — {report['primary_diagnosis']}**")
+        if local_disagreement:
+            st.caption(text["local_differs"])
         tabs = st.tabs([text["vision"], text["crosscheck"], text["grounding"]])
         with tabs[0]:
             st.caption(f"{vision_name} · screening score {report['vision'].get('confidence_score', 0.0):.2f}")
@@ -1773,15 +1831,64 @@ def render_consensus_report(report, language):
         with tabs[1]:
             reasoning = report["reasoning"]
             st.caption(reasoner_name)
-            st.write(reasoning.get("explanation") or text["not_configured"])
             alternatives = reasoning.get("alternatives") or []
-            st.markdown(
-                f"**{text['alternatives']}**\n\n"
-                + ("\n".join(f"- {name}" for name in alternatives) if alternatives else text["no_alternatives"])
-            )
+            explanation = reasoning.get("explanation") or text["not_configured"]
+            if local_disagreement:
+                with st.expander(text["crosscheck_details"]):
+                    st.caption(explanation)
+                    st.markdown(
+                        f"**{text['alternatives']}**\n\n"
+                        + (
+                            "\n".join(f"- {name}" for name in alternatives)
+                            if alternatives else text["no_alternatives"]
+                        )
+                    )
+            else:
+                st.write(explanation)
+                st.markdown(
+                    f"**{text['alternatives']}**\n\n"
+                    + (
+                        "\n".join(f"- {name}" for name in alternatives)
+                        if alternatives else text["no_alternatives"]
+                    )
+                )
         with tabs[2]:
             grounding = report["web_grounding"]
+            if grounding.get("message") == "Regional search has not been requested.":
+                st.caption(text["search_not_requested"])
+            with st.form("regional_search_request"):
+                search_confirmed = st.checkbox(
+                    text["search_confirm"],
+                    value=False,
+                    key="confirm_regional_search",
+                )
+                search_submitted = st.form_submit_button(text["search_submit"])
+            if search_submitted and search_confirmed:
+                vision_report = report.get("vision") or {}
+                with st.spinner("Searching regional sources..."):
+                    search_result = cropguard_consensus.run_regional_search(
+                        selected_crop=report.get("detected_crop") or "",
+                        region=report.get("region") or "",
+                        diagnosis_hint=vision_report.get("primary_diagnosis")
+                        or report.get("primary_diagnosis")
+                        or "",
+                        config=search_config or {},
+                    )
+                report = dict(report)
+                report["web_grounding"] = {
+                    "available": search_result.available,
+                    "results": search_result.results,
+                    "message": search_result.message,
+                    "error": search_result.error,
+                }
+                st.session_state["last_consensus_report"] = report
+            elif search_submitted:
+                st.info(text["search_not_requested"])
+            grounding = report["web_grounding"]
             st.info(grounding.get("message") or text["no_sources"])
+            if grounding.get("error"):
+                with st.expander(text["search_error"]):
+                    st.code(grounding["error"])
             for result in grounding.get("results", []):
                 with st.container(border=True):
                     st.markdown(f"**{result.get('title', 'Source')}**")
@@ -1789,7 +1896,10 @@ def render_consensus_report(report, language):
                     url = result.get("url", "")
                     if url.startswith(("https://", "http://")):
                         st.link_button("Open source", url)
-        notes = report.get("notes") or []
+        notes = [
+            note for note in (report.get("notes") or [])
+            if "gemini" not in str(note).casefold()
+        ]
         if notes:
             with st.expander(text["notes"]):
                 for note in notes:
@@ -1893,9 +2003,35 @@ HUB_COUNTRIES = {
     "Kumasi, Ghana (Cocoa & Grain Belt)": "Ghana",
 }
 
-# No verified registration feed is configured, so chemical recommendations are
-# withheld for every country until a reviewed, country-specific allowlist exists.
-VERIFIED_CHEMICAL_ACTIONS_BY_COUNTRY_AND_CROP = {}
+# Kenya-specific chemical action codes reviewed for the listed crop families.
+# Keep this allowlist limited to actions supported by local extension guidance.
+VERIFIED_CHEMICAL_ACTIONS_BY_COUNTRY_AND_CROP = {
+    "Kenya": {
+        "maize": frozenset({
+            "CHEM_COPPER", "CHEM_SYSTEMIC", "CHEM_CATERPILLAR", "CHEM_VECTOR",
+        }),
+        "potato": frozenset({
+            "CHEM_COPPER", "CHEM_LATE_BLIGHT", "CHEM_PROTECTANT",
+            "CHEM_SYSTEMIC", "CHEM_CATERPILLAR",
+        }),
+        "tomato": frozenset({
+            "CHEM_COPPER", "CHEM_LATE_BLIGHT", "CHEM_PROTECTANT",
+            "CHEM_SYSTEMIC", "CHEM_CATERPILLAR", "CHEM_VECTOR",
+        }),
+        "beans": frozenset({
+            "CHEM_COPPER", "CHEM_PROTECTANT", "CHEM_SYSTEMIC", "CHEM_VECTOR",
+        }),
+        "tea": frozenset({"CHEM_COPPER", "CHEM_SYSTEMIC"}),
+        "coffee": frozenset({"CHEM_COFFEE", "CHEM_COPPER"}),
+        "banana": frozenset({
+            "CHEM_COPPER", "CHEM_PROTECTANT", "CHEM_SYSTEMIC",
+        }),
+        "brassica": frozenset({
+            "CHEM_COPPER", "CHEM_PROTECTANT", "CHEM_SYSTEMIC",
+            "CHEM_CATERPILLAR",
+        }),
+    },
+}
 
 CHEMICAL_ACTION_CODES = frozenset(
     code
@@ -2036,6 +2172,310 @@ def render_disease_guide(guide_key, crop_name, language, severity_stage, hub_lab
             st.caption(advisory["chemical_notice"])
         else:
             st.warning(advisory["chemical_notice"])
+
+
+def render_missing_kb_advisory(
+    advisory,
+    language,
+    region_resources=None,
+    hub_label=None,
+    crop_name=None,
+    guide_key=None,
+    severity_stage="",
+):
+    if not advisory:
+        return
+
+    headings = {
+        "English": {
+            "part1": "### Part 1: Farmer-Friendly Summary",
+            "disease": "**Disease Detected:**",
+            "cures": "**Cures & Management Options:**",
+            "where": "**Where to Obtain Cures:**",
+            "support": "**Regional Support Hubs & Contacts:**",
+            "title": "Crop screening guidance (not a confirmed diagnosis)",
+            "withheld": "No verified, crop- and country-specific chemical treatment is available here. Confirm approved options with your national agricultural authority or extension officer.",
+            "verify": "Directory details and stock are not independently verified. Contact the organization before travel or purchase.",
+            "no_suppliers": "No local agro-vet or input supplier is listed for this region. Ask an extension officer for a trusted supplier.",
+            "no_support": "No regional extension or research contact is listed for this hub.",
+            "location": "Location",
+            "contact": "Contact",
+            "specialty": "Specialization",
+            "when_to_seek_help": "When to seek local help",
+            "disclaimer": (
+                "Screening guidance only—not a confirmed diagnosis. Verify treatment and "
+                "local approval with a qualified agricultural extension officer."
+            ),
+        },
+        "Kiswahili": {
+            "part1": "### Sehemu ya 1: Muhtasari kwa Mkulima",
+            "disease": "**Ugonjwa Uliogunduliwa:**",
+            "cures": "**Tiba na Mbinu za Kudhibiti:**",
+            "where": "**Mahali pa Kupata Tiba:**",
+            "support": "**Vituo vya Usaidizi vya Eneo na Mawasiliano:**",
+            "title": "Mwongozo wa uchunguzi wa zao (si utambuzi uliothibitishwa)",
+            "withheld": "Hakuna matibabu ya kemikali yaliyothibitishwa kwa zao na nchi hii. Thibitisha chaguo zilizoidhinishwa kwa mamlaka ya kilimo au afisa wa ugani.",
+            "verify": "Taarifa za mawasiliano na bidhaa hazijathibitishwa kwa kujitegemea. Wasiliana na taasisi kabla ya kusafiri au kununua.",
+            "no_suppliers": "Hakuna muuzaji wa pembejeo aliyeorodheshwa katika eneo hili. Uliza afisa wa ugani akupe muuzaji anayeaminika.",
+            "no_support": "Hakuna mawasiliano ya ugani au utafiti yaliyoorodheshwa kwa kituo hiki.",
+            "location": "Eneo",
+            "contact": "Mawasiliano",
+            "specialty": "Utaalamu",
+            "when_to_seek_help": "Wakati wa kutafuta msaada wa eneo",
+            "disclaimer": (
+                "Mwongozo wa uchunguzi pekee—si utambuzi uliothibitishwa. Thibitisha tiba "
+                "na idhini yake kwa afisa wa ugani wa kilimo aliyehitimu."
+            ),
+        },
+        "French": {
+            "part1": "### Partie 1 : Résumé pour l’agriculteur",
+            "disease": "**Maladie détectée :**",
+            "cures": "**Traitements et méthodes de gestion :**",
+            "where": "**Où trouver les traitements :**",
+            "support": "**Centres d’assistance régionaux et contacts :**",
+            "title": "Conseils de dépistage (diagnostic non confirmé)",
+            "withheld": "Aucun traitement chimique vérifié pour cette culture et ce pays n’est disponible ici. Confirmez les options autorisées auprès de l’autorité agricole ou d’un conseiller.",
+            "verify": "Les coordonnées et la disponibilité ne sont pas vérifiées indépendamment. Contactez l’organisme avant tout déplacement ou achat.",
+            "no_suppliers": "Aucun fournisseur agricole local n’est répertorié. Demandez à un conseiller agricole un fournisseur fiable.",
+            "no_support": "Aucun contact régional de conseil ou de recherche n’est répertorié pour ce hub.",
+            "location": "Lieu",
+            "contact": "Contact",
+            "specialty": "Spécialité",
+            "when_to_seek_help": "Quand demander une aide locale",
+            "disclaimer": (
+                "Conseils de dépistage uniquement—diagnostic non confirmé. Vérifiez les "
+                "traitements et leur homologation auprès d’un conseiller agricole qualifié."
+            ),
+        },
+    }
+    labels = headings.get(language, headings["English"])
+    st.markdown(labels["part1"])
+    st.markdown(f"#### {labels['title']}")
+    st.caption(labels["disclaimer"])
+    st.markdown(labels["disease"])
+    st.write(advisory["disease_detected_description"])
+    st.markdown(labels["cures"])
+    if advisory["management_options"]:
+        st.markdown(
+            "\n".join(
+                f"{index}. {html.escape(item)}"
+                for index, item in enumerate(advisory["management_options"], 1)
+            )
+        )
+    else:
+        st.write(labels["withheld"])
+
+    reference_advisory = (
+        build_disease_advisory(
+            guide_key, crop_name, language, severity_stage, hub_label
+        )
+        if guide_key and hub_label and crop_name
+        else None
+    )
+    chemical_label = {
+        "English": "Chemical options",
+        "Kiswahili": "Chaguo za kemikali",
+        "French": "Options chimiques",
+    }.get(language, "Chemical options")
+    verified_chemical_options = []
+    if reference_advisory:
+        verified_chemical_options = next(
+            (
+                items for title, items in reference_advisory["sections"]
+                if title == chemical_label
+            ),
+            [],
+        )
+    if verified_chemical_options:
+        st.markdown("\n".join(
+            f"- {html.escape(item)}" for item in verified_chemical_options
+        ))
+        st.caption(reference_advisory["chemical_notice"])
+    else:
+        st.info(labels["withheld"])
+
+    st.markdown(labels["where"])
+    st.write(advisory["where_to_obtain_cures"])
+    resources = region_resources or []
+    supplier_terms = ("agro-vet", "agrovet", "agro-store", "agro store", "input supplier")
+    suppliers = [
+        item for item in resources
+        if any(
+            term in f"{item.get('name', '')} {item.get('specialty', '')}".casefold()
+            for term in supplier_terms
+        )
+    ]
+    if suppliers:
+        for resource in suppliers:
+            st.markdown(
+                f"- **{html.escape(str(resource.get('name', '')))}** — "
+                f"{labels['location']}: {html.escape(str(resource.get('location', '')))}; "
+                f"{labels['contact']}: {html.escape(str(resource.get('contact', '')))}"
+            )
+    else:
+        st.write(labels["no_suppliers"])
+
+    st.markdown(labels["support"])
+    support_hubs = [item for item in resources if item not in suppliers]
+    if support_hubs:
+        for resource in support_hubs:
+            st.markdown(
+                f"- **{html.escape(str(resource.get('name', '')))}** — "
+                f"{labels['location']}: {html.escape(str(resource.get('location', '')))}; "
+                f"{labels['contact']}: {html.escape(str(resource.get('contact', '')))}; "
+                f"{labels['specialty']}: {html.escape(str(resource.get('specialty', '')))}"
+            )
+        st.caption(labels["verify"])
+    else:
+        st.write(labels["no_support"])
+
+def render_advisory_technical_analysis(advisory, language):
+    if not advisory:
+        return
+
+    headings = {
+        "English": (
+            "### Part 2: Full Technical Analysis",
+            "**Scientific classification:**",
+            "**Pathological or physiological breakdown:**",
+            "**Environmental and spore/vector dynamics:**",
+            "**Mechanisms of action:**",
+            "**When to seek local help:**",
+        ),
+        "Kiswahili": (
+            "### Sehemu ya 2: Uchambuzi Kamili wa Kitaalamu",
+            "**Uainishaji wa kisayansi:**",
+            "**Maelezo ya ugonjwa au athari za kifiziolojia:**",
+            "**Mienendo ya mazingira na spora/visambazaji:**",
+            "**Mbinu za utendaji:**",
+            "**Wakati wa kutafuta msaada wa eneo:**",
+        ),
+        "French": (
+            "### Partie 2 : Analyse technique complète",
+            "**Classification scientifique :**",
+            "**Analyse pathologique ou physiologique :**",
+            "**Dynamique environnementale et des spores/vecteurs :**",
+            "**Mécanismes d’action :**",
+            "**Quand demander une aide locale :**",
+        ),
+    }
+    (
+        title,
+        classification_label,
+        pathology_label,
+        dynamics_label,
+        mechanisms_label,
+        help_label,
+    ) = headings.get(language, headings["English"])
+    st.markdown(title)
+    for field_name, label in (
+        ("scientific_classification", classification_label),
+        ("pathology_physiology", pathology_label),
+        ("environmental_dynamics", dynamics_label),
+        ("mechanisms_of_action", mechanisms_label),
+        ("when_to_seek_help", help_label),
+    ):
+        st.markdown(label)
+        st.write(advisory[field_name])
+
+
+def render_uncertain_assessment(assessment, language):
+    if not assessment:
+        return
+
+    headings = {
+        "English": {
+            "title": "Additional screening estimate (unconfirmed)",
+            "confidence": "Screening score (not calibrated)",
+            "observations": "Visible observations",
+            "next_steps": "Cautious next steps",
+            "seek_help_when": "When to seek local help",
+            "image_quality": "Image quality",
+        },
+        "Kiswahili": {
+            "title": "Makadirio ya ziada ya uchunguzi (hayajathibitishwa)",
+            "confidence": "Alama ya uchunguzi (haijathibitishwa)",
+            "observations": "Dalili zinazoonekana",
+            "next_steps": "Hatua za tahadhari",
+            "seek_help_when": "Wakati wa kutafuta msaada wa eneo",
+            "image_quality": "Ubora wa picha",
+        },
+        "French": {
+            "title": "Estimation complémentaire (non confirmée)",
+            "confidence": "Score de dépistage (non calibré)",
+            "observations": "Observations visibles",
+            "next_steps": "Étapes prudentes",
+            "seek_help_when": "Quand demander une aide locale",
+            "image_quality": "Qualité de l’image",
+        },
+    }
+    labels = headings.get(language, headings["English"])
+    st.markdown(f"#### {labels['title']}")
+    st.write(assessment["assessment"])
+    st.caption(
+        f"{labels['confidence']}: {assessment['confidence']:.0%}. "
+        f"{labels['image_quality']}: {assessment['image_quality']}"
+    )
+    for field_name in ("observations", "next_steps"):
+        items = assessment[field_name]
+        if items:
+            st.markdown(f"**{labels[field_name]}**")
+            st.markdown(
+                "\n".join(f"- {html.escape(item)}" for item in items),
+                unsafe_allow_html=True,
+            )
+    if assessment["severity_description"]:
+        st.write(assessment["severity_description"])
+    st.markdown(f"**{labels['seek_help_when']}**")
+    st.write(assessment["seek_help_when"])
+
+
+def render_hub_resource_directory(resources, hub_label, gps_status, language):
+    headings = {
+        "English": {
+            "gps": "Resources matched automatically to your GPS region.",
+            "selected": "Resources shown for the selected region. Allow location access to match a hub automatically.",
+            "empty": "No resources are listed for this region.",
+            "location": "Location",
+            "contact": "Contact",
+            "specialty": "Specialization",
+        },
+        "Kiswahili": {
+            "gps": "Rasilimali zimechaguliwa kiotomatiki kulingana na eneo lako la GPS.",
+            "selected": "Rasilimali za eneo lililochaguliwa zinaonyeshwa. Ruhusu ufikiaji wa eneo ili kulinganisha kituo kiotomatiki.",
+            "empty": "Hakuna rasilimali zilizoorodheshwa kwa eneo hili.",
+            "location": "Eneo",
+            "contact": "Mawasiliano",
+            "specialty": "Utaalamu",
+        },
+        "French": {
+            "gps": "Ressources associées automatiquement à votre région GPS.",
+            "selected": "Ressources de la région sélectionnée. Autorisez la localisation pour associer automatiquement un hub.",
+            "empty": "Aucune ressource n’est répertoriée pour cette région.",
+            "location": "Lieu",
+            "contact": "Contact",
+            "specialty": "Spécialité",
+        },
+    }
+    labels = headings.get(language, headings["English"])
+    gps_status = gps_status or {}
+    gps_matches_hub = (
+        gps_status.get("kind") == "ok"
+        and gps_status.get("hub") == hub_label
+    ) or (
+        gps_status.get("kind") == "global"
+        and hub_label == GPS_FALLBACK_HUB
+    )
+    st.caption(labels["gps"] if gps_matches_hub else labels["selected"])
+    if not resources:
+        st.info(labels["empty"])
+        return
+
+    for resource in resources:
+        with st.expander(f"🌱 {resource['name']}"):
+            st.write(f"**{labels['location']}:** {resource['location']}")
+            st.write(f"**{labels['contact']}:** `{resource['contact']}`")
+            st.write(f"**{labels['specialty']}:** {resource['specialty']}")
 
 
 def current_disease_advisory(language, hub_label):
@@ -2340,9 +2780,13 @@ def render_guided_tour(lang_name, force_start=False):
             tourStyle.id = "cg-tour-style";
             tourStyle.textContent = `
                 #cg-tour-box {{ position:fixed; right:24px; bottom:24px; width:min(360px, calc(100vw - 32px)); padding:20px; box-sizing:border-box; border:1px solid #DCE5DC; border-radius:14px; background:#FFFFFF; color:#1F2937; box-shadow:0 8px 28px rgba(15, 23, 42, .16); font-family:system-ui, sans-serif; z-index:2147483003; }}
-                #cg-tour-box button {{ min-height:38px; padding:8px 14px; border:1px solid #D1D5DB; border-radius:8px; background:#FFFFFF; color:#374151; font:inherit; font-weight:600; cursor:pointer; }}
+                #cg-tour-box, #cg-tour-box * {{ text-shadow:none !important; -webkit-text-fill-color:currentColor !important; }}
+                #cg-tour-box #cg-tour-progress {{ color:#526052 !important; }}
+                #cg-tour-box #cg-tour-title {{ color:#1F2937 !important; }}
+                #cg-tour-box #cg-tour-description {{ color:#4B5563 !important; }}
+                #cg-tour-box button {{ min-height:38px; padding:8px 14px; border:1px solid #D1D5DB; border-radius:8px; background:#FFFFFF; color:#374151 !important; font:inherit; font-weight:600; cursor:pointer; }}
                 #cg-tour-box button:focus-visible {{ outline:3px solid #86B98A; outline-offset:2px; }}
-                #cg-tour-box #cg-btn-next {{ border-color:#2F6B3B; background:#2F6B3B; color:#FFFFFF; }}
+                #cg-tour-box #cg-btn-next {{ border-color:#2F6B3B; background:#2F6B3B; color:#FFFFFF !important; }}
                 #cg-tour-box button:disabled {{ opacity:.45; cursor:default; }}
                 @media (max-width: 520px) {{
                     #cg-tour-box {{ right:12px; bottom:12px; width:calc(100vw - 24px); }}
@@ -2950,6 +3394,254 @@ language = st.sidebar.selectbox(
 
 T = TRANSLATIONS.get(language, TRANSLATIONS["English"])
 
+def inject_page_theme(background_image_url, dark_mode_gradient_overlay):
+    background_image_css = json.dumps(background_image_url)
+    st.markdown("""
+    <style>
+    .stApp,
+    [data-testid="stAppViewContainer"] {
+        color: #E2E8F0 !important;
+        background-color: #1A1D20 !important;
+    }
+    .stApp,
+    [data-testid="stAppViewContainer"] {
+        background-image: __DARK_MODE_OVERLAY__, url(__BACKGROUND_IMAGE__) !important;
+        background-position: center, center;
+        background-size: cover, cover;
+        background-attachment: fixed, fixed;
+        background-repeat: no-repeat, no-repeat;
+    }
+    .main .block-container {
+        color: #E2E8F0;
+    }
+    [data-testid="stMain"] h1,
+    [data-testid="stMain"] h2,
+    [data-testid="stMain"] h3,
+    [data-testid="stMain"] h4,
+    [data-testid="stMain"] h5,
+    [data-testid="stMain"] h6,
+    [data-testid="stMain"] p,
+    [data-testid="stMain"] span,
+    [data-testid="stMain"] li,
+    [data-testid="stMain"] label,
+    [data-testid="stMain"] [data-testid="stMarkdownContainer"],
+    [data-testid="stMain"] [data-testid="stCaptionContainer"] {
+        color: #E2E8F0 !important;
+        -webkit-text-fill-color: #E2E8F0 !important;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+    }
+    [data-testid="stMain"] [data-testid="stMarkdownContainer"] *,
+    [data-testid="stMain"] [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] *,
+    [data-testid="stMain"] [data-testid="stChatMessage"] p,
+    [data-testid="stMain"] [data-testid="stChatMessage"] span {
+        color: #E2E8F0 !important;
+        -webkit-text-fill-color: #E2E8F0 !important;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+    }
+    [data-testid="stMain"] [data-testid="stCaptionContainer"],
+    [data-testid="stMain"] [data-testid="stCaptionContainer"] * {
+        color: #94A3B8 !important;
+    }
+
+    [data-testid="stMain"] [data-testid="stVerticalBlock"] [data-testid="stContainer"],
+    [data-testid="stMain"] [data-testid="stExpander"],
+    [data-testid="stMain"] [data-testid="stChatMessage"] {
+        color: #E2E8F0 !important;
+        background-color: rgba(30, 34, 39, 0.78) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 12px !important;
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+    }
+
+    [data-testid="stMain"] .stButton > button,
+    [data-testid="stMain"] [data-testid="stFormSubmitButton"] button,
+    [data-testid="stMain"] [data-testid="stLinkButton"] a,
+    [data-testid="stMain"] [data-testid="stDownloadButton"] button {
+        color: #FFFFFF !important;
+        background: #5B8C5A !important;
+        border: 1px solid #5B8C5A !important;
+        border-radius: 8px !important;
+        font-weight: 650 !important;
+        text-shadow: none !important;
+    }
+    [data-testid="stMain"] .stButton > button:hover,
+    [data-testid="stMain"] [data-testid="stFormSubmitButton"] button:hover,
+    [data-testid="stMain"] [data-testid="stLinkButton"] a:hover,
+    [data-testid="stMain"] [data-testid="stDownloadButton"] button:hover {
+        color: #FFFFFF !important;
+        background: #6A9B69 !important;
+        border-color: #6A9B69 !important;
+    }
+
+    [data-testid="stMain"] [data-baseweb="select"] > div,
+    [data-testid="stMain"] [data-baseweb="input"] > div,
+    [data-testid="stMain"] [data-baseweb="textarea"] > div,
+    [data-testid="stMain"] [data-testid="stDateInput"] input,
+    [data-testid="stMain"] [data-testid="stTimeInput"] input,
+    [data-testid="stMain"] [data-testid="stFileUploader"] {
+        color: #E2E8F0 !important;
+        background: #202429 !important;
+        border-color: rgba(255, 255, 255, 0.14) !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stMain"] [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] {
+        background: rgba(15, 40, 22, 0.85) !important;
+        border: 2px dashed #81C784 !important;
+    }
+    [data-testid="stMain"] [data-testid="stFileUploader"] button {
+        color: #FFFFFF !important;
+        background: #F57C00 !important;
+        border: 1px solid #F57C00 !important;
+        opacity: 1 !important;
+        text-shadow: none !important;
+    }
+    [data-testid="stMain"] [data-testid="stFileUploader"] button:hover {
+        color: #FFFFFF !important;
+        background: #E56A00 !important;
+        border-color: #E56A00 !important;
+    }
+    [data-testid="stMain"] [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] {
+        color: #FFFFFF !important;
+    }
+    [data-testid="stMain"] [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] * {
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+        text-shadow: none !important;
+    }
+    [data-testid="stMain"] [data-baseweb="select"] input,
+    [data-testid="stMain"] [data-baseweb="input"] input {
+        color: #E2E8F0 !important;
+        -webkit-text-fill-color: #E2E8F0 !important;
+    }
+    [data-testid="stMain"] [data-testid="stTextArea"] textarea,
+    [data-testid="stMain"] textarea[data-baseweb="textarea"] {
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+        background-color: #202429 !important;
+        caret-color: #FFFFFF !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border-radius: 8px !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stMain"] input::placeholder,
+    [data-testid="stMain"] textarea::placeholder {
+        color: #94A3B8 !important;
+        -webkit-text-fill-color: #94A3B8 !important;
+    }
+
+    [data-testid="stMain"] [data-testid="stMetric"] {
+        color: #E2E8F0 !important;
+        background: rgba(30, 34, 39, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 12px;
+    }
+    [data-testid="stMain"] [data-testid="stMetricValue"] {
+        color: #E2E8F0 !important;
+        -webkit-text-fill-color: #E2E8F0 !important;
+        font-weight: 750 !important;
+        font-size: clamp(1rem, 2.4vw, 1.7rem) !important;
+        line-height: 1.25 !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        word-break: normal !important;
+        overflow: visible !important;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+    }
+    [data-testid="stMain"] [data-testid="stMetricValue"] *,
+    [data-testid="stMain"] [data-testid="stMetricLabel"],
+    [data-testid="stMain"] [data-testid="stMetricLabel"] * {
+        max-width: 100% !important;
+        height: auto !important;
+        overflow: visible !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        word-break: normal !important;
+        text-overflow: clip !important;
+    }
+    [data-testid="stMain"] [data-testid="stMetricLabel"],
+    [data-testid="stMain"] [data-testid="stMetricLabel"] * {
+        color: #E2E8F0 !important;
+        -webkit-text-fill-color: #E2E8F0 !important;
+        font-weight: 650 !important;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+    }
+
+    [data-testid="stMain"] [data-testid="stDataFrame"],
+    [data-testid="stMain"] [data-testid="stTable"],
+    [data-testid="stMain"] [data-testid="stDataEditor"] {
+        background: rgba(30, 34, 39, 0.85) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    [data-testid="stMain"] [data-testid="stDataFrame"] *,
+    [data-testid="stMain"] [data-testid="stTable"] *,
+    [data-testid="stMain"] [data-testid="stDataEditor"] * {
+        color: #E2E8F0;
+    }
+    [data-testid="stMain"] [data-testid="stPlotlyChart"],
+    [data-testid="stMain"] [data-testid="stVegaLiteChart"],
+    [data-testid="stMain"] [data-testid="stPyplotChart"],
+    [data-testid="stMain"] [data-testid="stAltairChart"] {
+        background: rgba(30, 34, 39, 0.72) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 12px;
+        padding: 0.35rem;
+    }
+
+    [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab-list"] {
+        gap: 0.35rem;
+        border-bottom-color: rgba(255, 255, 255, 0.1);
+    }
+    [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab"] {
+        color: #94A3B8 !important;
+    }
+    [data-testid="stMain"] [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
+        color: #FFFFFF !important;
+        background: #5B8C5A !important;
+        border-radius: 8px 8px 0 0;
+    }
+
+    [data-testid="stMain"] [data-testid="stAlert"] {
+        color: #E2E8F0 !important;
+        background: rgba(30, 34, 39, 0.92) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 10px !important;
+    }
+    [data-testid="stMain"] [data-testid="stAlert"] * {
+        color: #E2E8F0 !important;
+        text-shadow: none !important;
+    }
+    </style>
+    """.replace("__DARK_MODE_OVERLAY__", dark_mode_gradient_overlay)
+    .replace("__BACKGROUND_IMAGE__", background_image_css), unsafe_allow_html=True)
+
+
+PAGE_THEMES = {
+    T["nav_ai"]: (
+        "https://images.unsplash.com/photo-1530836369250-ef72a3f5cda8?auto=format&fit=crop&w=2200&q=85",
+        "linear-gradient(135deg, rgba(8, 18, 23, 0.82), rgba(12, 24, 27, 0.88))",
+    ),
+    T["nav_map"]: (
+        "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?auto=format&fit=crop&w=2200&q=85",
+        "linear-gradient(135deg, rgba(6, 12, 23, 0.78), rgba(10, 17, 29, 0.9))",
+    ),
+    T["nav_forum"]: (
+        "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=2200&q=85",
+        "linear-gradient(135deg, rgba(25, 18, 10, 0.78), rgba(16, 19, 18, 0.88))",
+    ),
+    T["nav_acc"]: (
+        "https://images.unsplash.com/photo-1523348837708-15d4a09cfac2?auto=format&fit=crop&w=2200&q=85",
+        "linear-gradient(135deg, rgba(10, 15, 25, 0.84), rgba(13, 18, 27, 0.9))",
+    ),
+}
+
+if app_mode != T["nav_diag"]:
+    background_image_url, dark_mode_gradient_overlay = PAGE_THEMES[app_mode]
+    inject_page_theme(background_image_url, dark_mode_gradient_overlay)
+
 gps_status = st.session_state.get("gps_status")
 if gps_status:
     _gps_kind = gps_status["kind"]
@@ -3027,19 +3719,24 @@ else:
 
 def generate_cropguard_reply(prompt, messages, hub_label, zone_data, language,
                              knowledge_context=""):
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
+    def configured_value(key):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
         try:
-            api_key = st.secrets.get("OPENAI_API_KEY", "").strip()
+            value = st.secrets.get(key, "")
         except (FileNotFoundError, KeyError, RuntimeError):
-            api_key = ""
-    if not api_key:
+            value = ""
+        return value.strip() if isinstance(value, str) else ""
+
+    api_key = configured_value("OPENAI_API_KEY")
+    gemini_api_key = configured_value("GEMINI_API_KEY")
+    if not api_key and not gemini_api_key:
         raise RuntimeError(
-            "CropGuard chat needs an OpenAI API key. Set OPENAI_API_KEY as an environment "
-            "variable or add OPENAI_API_KEY to your Streamlit secrets."
+            "CropGuard chat is not configured. Contact the administrator."
         )
 
-    model = os.environ.get("OPENAI_MODEL", "").strip() or "gpt-4o-mini"
+    model = configured_value("OPENAI_MODEL") or "gpt-4o-mini"
     system_instruction = f"""
 You are CropGuard AI, an expert, practical, and empathetic agricultural assistant for farmers,
 extension workers, and agricultural researchers worldwide. Give accurate, actionable,
@@ -3063,6 +3760,8 @@ country and crop. When it is withheld or absent, give non-chemical options and r
 user to their national agricultural authority or extension officer.
 Be transparent when uncertain, and recommend a local extension officer for urgent or
 high-consequence decisions.
+Identify yourself as CropGuard's AI assistant. If asked about the technology behind a
+response, explain that CropGuard uses AI-based tools without naming a specific provider.
 
 Respond in {language}. Use the user's language if their message clearly uses a different
 language. Consider this current farm context when relevant: region={hub_label}; temperature
@@ -3088,7 +3787,72 @@ registration claims omitted from it:
         if message.get("role") in {"user", "assistant"} and message.get("content")
     ]
     api_messages.append({"role": "user", "content": prompt})
-    response = requests.post(
+
+    def generate_gemini_reply():
+        contents = [
+            {
+                "role": "model" if message["role"] == "assistant" else "user",
+                "parts": [{"text": message["content"]}],
+            }
+            for message in api_messages[1:]
+        ]
+        response = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{configured_value('GEMINI_CHAT_MODEL') or 'gemini-3.5-flash-lite'}:generateContent",
+            headers={"x-goog-api-key": gemini_api_key},
+            json={
+                "systemInstruction": {"parts": [{"text": system_instruction}]},
+                "contents": contents,
+                "generationConfig": {
+                    "temperature": 0.4,
+                    "maxOutputTokens": 900,
+                },
+            },
+            timeout=(5, 30),
+        )
+        if not response.ok:
+            try:
+                error_data = response.json()
+                detail = error_data.get("error", {}).get("message", "")
+            except (ValueError, AttributeError):
+                detail = ""
+            message = f"AI service returned HTTP {response.status_code}."
+            if detail:
+                message += f" {detail}"
+            raise RuntimeError(message)
+        try:
+            result = response.json()
+        except ValueError as error:
+            raise RuntimeError("AI service returned an invalid response. Please try again.") from error
+        try:
+            reply = result["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise RuntimeError("AI service did not return a text answer. Please try again.") from error
+        if not isinstance(reply, str) or not reply.strip():
+            raise RuntimeError("AI service did not return a text answer. Please try again.")
+        return reply.strip()
+
+    if not api_key:
+        return generate_gemini_reply()
+
+    def fallback_to_gemini(openai_error):
+        if not gemini_api_key:
+            raise openai_error
+        try:
+            return generate_gemini_reply()
+        except (requests.RequestException, RuntimeError) as gemini_error:
+            raise RuntimeError(
+                "CropGuard could not get a response from its configured AI services. "
+                "Please try again later."
+            ) from gemini_error
+
+    def openai_request_with_fallback(*args, **kwargs):
+        try:
+            return requests.post(*args, **kwargs)
+        except requests.RequestException as error:
+            return fallback_to_gemini(error)
+
+    response = openai_request_with_fallback(
         "https://api.openai.com/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
         json={
@@ -3099,6 +3863,9 @@ registration claims omitted from it:
         },
         timeout=(5, 30),
     )
+    if isinstance(response, str):
+        return response
+
     if not response.ok:
         try:
             error_data = response.json()
@@ -3108,7 +3875,7 @@ registration claims omitted from it:
         message = f"OpenAI API returned HTTP {response.status_code}."
         if detail:
             message += f" {detail}"
-        raise RuntimeError(message)
+        return fallback_to_gemini(RuntimeError(message))
 
     try:
         result = response.json()
@@ -3466,7 +4233,7 @@ def render_map_legend(T, *, show_heat, show_overlay, overlay_style):
         chips = "".join(
             "<span class='cg-chip'><span class='cg-dot' "
             f"style='background:{_rgb_css(_outbreak_color(severity))};'></span>"
-            f"{html_escape(_map_text(T, key, key, lo=low, hi=high))}</span>"
+            f"<span class='cg-chip-text'>{html_escape(_map_text(T, key, key, lo=low, hi=high))}</span></span>"
             for key, severity in (("sev_1", 0), ("sev_2", (low + high) / 2), ("sev_3", 100))
         )
         note_key = "legend_columns" if overlay_style == "columns" else "legend_points"
@@ -3480,17 +4247,19 @@ def render_map_legend(T, *, show_heat, show_overlay, overlay_style):
         return
     st.markdown("""
     <style>
-    .cg-legend { display: flex; flex-wrap: wrap; gap: 18px 32px; background: #12301A; border: 1px solid #76FF03;
-                 border-radius: 12px; padding: 14px 20px; margin: 8px 0 14px 0; box-shadow: 0 6px 20px rgba(0,0,0,0.6); }
+    .cg-legend { display: flex; flex-wrap: wrap; gap: 18px 32px; width: 100%; min-width: 0; box-sizing: border-box;
+                 background: #12301A; border: 1px solid #76FF03; border-radius: 12px; padding: 14px 20px;
+                 margin: 8px 0 14px 0; box-shadow: 0 6px 20px rgba(0,0,0,0.6); }
     .cg-legend * { color: #FFFFFF !important; text-shadow: none !important; }
     .cg-legend-block { flex: 1 1 260px; min-width: 0; }
-    .cg-legend-title { font-weight: 800; font-size: 0.95rem; margin-bottom: 6px; }
+    .cg-legend-title { font-weight: 800; font-size: 0.95rem; margin-bottom: 6px; overflow-wrap: anywhere; }
     .cg-gradient { height: 12px; border-radius: 6px; }
     .cg-gradient-labels { display: flex; justify-content: space-between; font-size: 0.8rem; opacity: 0.85; margin-top: 2px; }
-    .cg-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.88rem; font-weight: 600; }
-    .cg-chip { display: inline-flex; align-items: center; gap: 6px; }
-    .cg-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid #FFFFFF; }
-    .cg-legend-note { font-size: 0.8rem; font-style: italic; margin-top: 6px; color: #C5E1A5 !important; }
+    .cg-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; min-width: 0; font-size: 0.88rem; font-weight: 600; }
+    .cg-chip { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; max-width: 100%; }
+    .cg-chip-text { min-width: 0; white-space: normal; overflow-wrap: anywhere; word-break: normal; }
+    .cg-dot { flex: 0 0 12px; width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid #FFFFFF; }
+    .cg-legend-note { font-size: 0.8rem; font-style: italic; margin-top: 6px; color: #C5E1A5 !important; overflow-wrap: anywhere; }
     </style>
     """ + f"<div class='cg-legend'>{''.join(parts)}</div>", unsafe_allow_html=True)
 
@@ -3838,7 +4607,8 @@ elif app_mode == T["nav_ai"]:
                         format_disease_advisory_context(prompt_advisory),
                     )
             except (requests.RequestException, RuntimeError) as error:
-                st.error(f"Could not get a CropGuard answer: {error}")
+                print(f"CropGuard chat request failed: {error}")
+                st.error("Could not get a CropGuard answer. Please try again later.")
             else:
                 st.session_state.messages.extend([
                     {"role": "user", "content": prompt},
@@ -3990,179 +4760,455 @@ else:
 
     @st.fragment
     def diagnostic_workflow():
-        if 'analysis_done' not in st.session_state:
-            st.session_state['analysis_done'] = False
-        if 'last_prediction' not in st.session_state:
-            st.session_state['last_prediction'] = None
-        if 'last_confidence' not in st.session_state:
-            st.session_state['last_confidence'] = None
-        if 'last_confidence_margin' not in st.session_state:
-            st.session_state['last_confidence_margin'] = None
-        if 'last_severity_stage' not in st.session_state:
-            st.session_state['last_severity_stage'] = None
-        if 'last_severity_pct' not in st.session_state:
-            st.session_state['last_severity_pct'] = None
-        if 'last_diagnosis_notice' not in st.session_state:
-            st.session_state['last_diagnosis_notice'] = None
-        if 'last_diagnosis_available' not in st.session_state:
-            st.session_state['last_diagnosis_available'] = False
-        if 'last_language' not in st.session_state:
-            st.session_state['last_language'] = language
-        if 'selected_crop' not in st.session_state:
-            st.session_state['selected_crop'] = None
-        if 'last_consensus_report' not in st.session_state:
-            st.session_state['last_consensus_report'] = None
+        st.session_state.setdefault("analysis_done", False)
+        st.session_state.setdefault("selected_crop", None)
+        st.session_state.setdefault("last_prediction", "")
+        st.session_state.setdefault("last_confidence", 0.0)
+        st.session_state.setdefault("last_confidence_margin", None)
+        st.session_state.setdefault("last_severity_stage", "")
+        st.session_state.setdefault("last_severity_pct", 0.0)
+        st.session_state.setdefault("last_diagnosis_notice", None)
+        st.session_state.setdefault("last_diagnosis_available", False)
+        st.session_state.setdefault("last_disease_guide", None)
+        st.session_state.setdefault("last_consensus_report", None)
+        st.session_state.setdefault("last_log_outcome", None)
+        st.session_state.setdefault("last_analysis_error", None)
+        st.session_state.setdefault("last_language", language)
+        st.session_state.setdefault("last_diagnostic_hub", selected_hub_label)
+        st.session_state.setdefault("last_gemini_advisory", None)
+        st.session_state.setdefault("last_gemini_advisory_error", None)
+        st.session_state.setdefault("last_gemini_gap_assessment", None)
+        st.session_state.setdefault("last_gemini_gap_error", None)
 
-        left_col, right_col = st.columns(2, gap="large")
+        def clear_diagnostic_results():
+            st.session_state.update({
+                "analysis_done": False,
+                "last_prediction": "",
+                "last_confidence": 0.0,
+                "last_confidence_margin": None,
+                "last_severity_stage": "",
+                "last_severity_pct": 0.0,
+                "last_diagnosis_notice": None,
+                "last_diagnosis_available": False,
+                "last_disease_guide": None,
+                "last_consensus_report": None,
+                "last_log_outcome": None,
+                "last_analysis_error": None,
+                "last_gemini_advisory": None,
+                "last_gemini_advisory_error": None,
+                "last_gemini_gap_assessment": None,
+                "last_gemini_gap_error": None,
+            })
 
-        with left_col:
-            with st.container(border=True):
-                crop_list = active_zone_data["crops"]
+        if (
+            st.session_state["last_language"] != language
+            or st.session_state["last_diagnostic_hub"] != selected_hub_label
+        ):
+            clear_diagnostic_results()
+            st.session_state["last_language"] = language
+            st.session_state["last_diagnostic_hub"] = selected_hub_label
 
-                st.markdown("<div id='tour-target-crop'></div>", unsafe_allow_html=True)
-                st.markdown(f"### {T['crop_select_header']}")
-                selected_crop = st.selectbox(T["crop_select_prompt"], crop_list, label_visibility="collapsed")
-                st.markdown("<br>", unsafe_allow_html=True)
+        uploaded_file = None
+        image = None
+        upload_bytes = None
+        assessment = None
+        image_quality = {"blocked": True}
+        sample_source_type = "🌱 Verified Farm Field Sample (Log to B2G Surveillance)"
+        analyze_triggered = False
 
-                st.markdown("<div id='tour-target-upload'></div>", unsafe_allow_html=True)
-                st.markdown(f"### {T['upload_header']} {T['upload_label_text']}")
-                uploaded_file = st.file_uploader("", type=["jpg", "jpeg", "png"], label_visibility="collapsed", key="file_upload")
-                
-                assessment = None
-                image_quality = None
-                sample_source_type = "Verified Farm Field Sample"
-                analyze_triggered = False
-                if uploaded_file is not None:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    upload_bytes = uploaded_file.getvalue()
-                    upload_digest = hashlib.sha256(upload_bytes).hexdigest()
-                    if st.session_state.get("_last_upload_digest") != upload_digest:
-                        st.session_state["_last_upload_digest"] = upload_digest
-                        st.session_state["analysis_done"] = False
-                        st.session_state["last_prediction"] = None
-                        st.session_state["last_confidence"] = None
-                        st.session_state["last_confidence_margin"] = None
-                        st.session_state["last_severity_stage"] = None
-                        st.session_state["last_severity_pct"] = None
-                        st.session_state["last_diagnosis_notice"] = None
-                        st.session_state["last_diagnosis_available"] = False
-                        st.session_state["last_disease_guide"] = None
-                        st.session_state["last_consensus_report"] = None
-                    image = ImageOps.exif_transpose(Image.open(uploaded_file))
-                    image_quality = assess_image_quality(image)
-                    st.image(image, caption=f"Field Sample Preview ({selected_crop.split(' ')[0]})", width="stretch")
-                    render_image_quality_feedback(image_quality, T)
-                    
-                    sample_source_type = st.radio(
-                        "Select Sample Origin (Telemetry Integrity Check):",
-                        ["🌱 Verified Farm Field Sample (Log to B2G Surveillance)", "🔬 Reference / Internet Sample (Test Only - Do Not Log)"],
-                        index=0,
-                        help="Prevents reference or internet photos from skewing regional disease outbreak statistics."
+        if not st.session_state.get("analysis_done", False):
+            crop_list = active_zone_data["crops"]
+            crop_widget_key = "diagnostic_crop_selector"
+            if st.session_state.get(crop_widget_key) not in crop_list:
+                st.session_state[crop_widget_key] = (
+                    st.session_state["selected_crop"]
+                    if st.session_state["selected_crop"] in crop_list
+                    else crop_list[0]
+                )
+
+            crop_col, upload_col = st.columns(2, gap="large")
+            with crop_col:
+                with st.container(border=True):
+                    st.markdown("<div id='tour-target-crop'></div>", unsafe_allow_html=True)
+                    st.markdown(f"### {T['crop_select_header']}")
+                    selected_crop = st.selectbox(
+                        T["crop_select_prompt"],
+                        crop_list,
+                        key=crop_widget_key,
+                        label_visibility="collapsed",
                     )
-                    
-                    assessment = di.assess_upload(upload_bytes)
-                    is_field_sample = "Verified Farm Field Sample" in sample_source_type
-                    
-                    if is_field_sample:
-                        di.render_assessment(st, T, assessment, attested=True)
-                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("<div id='tour-target-upload'></div>", unsafe_allow_html=True)
+                    st.markdown(f"### {T['upload_header']} {T['upload_label_text']}")
+                    uploaded_file = st.file_uploader(
+                        T["upload_label_text"],
+                        type=["jpg", "jpeg", "png"],
+                        key="file_upload",
+                        help=T["leaf_upload_help"],
+                    )
+
+            st.session_state["selected_crop"] = selected_crop
+            if uploaded_file is not None:
+                upload_bytes = uploaded_file.getvalue()
+                upload_digest = hashlib.sha256(upload_bytes).hexdigest()
+                if st.session_state.get("_last_upload_digest") != upload_digest:
+                    st.session_state["_last_upload_digest"] = upload_digest
+                    clear_diagnostic_results()
+
+            with upload_col:
+                with st.container(border=True):
+                    st.markdown(f"### {T['quality_integrity_header']}")
+                    if uploaded_file is None:
+                        st.caption(T["leaf_upload_help"])
+                    else:
+                        try:
+                            image = ImageOps.exif_transpose(Image.open(io.BytesIO(upload_bytes)))
+                            image_quality = assess_image_quality(image)
+                            st.image(image, caption=f"Field Sample Preview ({selected_crop.split(' ')[0]})", width=300)
+                            render_image_quality_feedback(image_quality, T)
+
+                            sample_source_type = st.radio(
+                                "Select Sample Origin (Telemetry Integrity Check):",
+                                [
+                                    "🌱 Verified Farm Field Sample (Log to B2G Surveillance)",
+                                    "🔬 Reference / Internet Sample (Test Only - Do Not Log)",
+                                ],
+                                index=0,
+                                key="diagnostic_sample_source",
+                                help="Prevents reference or internet photos from skewing regional disease outbreak statistics.",
+                            )
+                            assessment = di.assess_upload(upload_bytes)
+                            if "Verified Farm Field Sample" in sample_source_type:
+                                di.render_assessment(st, T, assessment, attested=True)
+                        except (OSError, ValueError) as error:
+                            st.error(T["image_open_error"].format(error=error))
+
                     st.markdown("<br>", unsafe_allow_html=True)
                     analyze_triggered = st.button(
                         T["analyze_btn"],
                         type="primary",
                         use_container_width=True,
-                        disabled=image_quality["blocked"],
+                        disabled=(
+                            uploaded_file is None
+                            or image is None
+                            or image_quality["blocked"]
+                        ),
+                    )
+        else:
+            st.markdown("<div id='tour-target-results'></div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                consensus_data = st.session_state.get("last_consensus_report") or {}
+                vision_data = consensus_data.get("vision") or {}
+                chosen_crop = (
+                    vision_data.get("detected_crop")
+                    if not vision_data.get("error")
+                    and vision_data.get("confidence_score", 0) > 0
+                    else None
+                ) or st.session_state.get("selected_crop") or "Unknown crop"
+                raw_label = st.session_state.get("last_prediction") or T["unsupported_crop_msg"]
+                confidence = float(st.session_state.get("last_confidence") or 0.0)
+                severity_stage = st.session_state.get("last_severity_stage") or "Not available"
+                severity_pct = float(st.session_state.get("last_severity_pct") or 0.0)
+                diagnosis_available = st.session_state.get("last_diagnosis_available", False)
+                is_healthy_prediction = (
+                    st.session_state.get("last_disease_guide") == "healthy"
+                    or consensus_data.get("health_status") == "healthy"
+                )
+                gap_assessment = st.session_state.get("last_gemini_gap_assessment")
+                gap_error = st.session_state.get("last_gemini_gap_error")
+                if gap_assessment and not diagnosis_available:
+                    raw_label = f"{chosen_crop}: AI estimate — {gap_assessment['assessment']}"
+                confidence_display = (
+                    f"{confidence:.1f}%" if diagnosis_available
+                    else f"{gap_assessment['confidence']:.0%}" if gap_assessment
+                    else "N/A"
+                )
+                severity_display = (
+                    f"{severity_pct:.1f}%"
+                    if diagnosis_available and severity_stage != "Not available"
+                    else (
+                        f"{gap_assessment['visual_discoloration_percent']:.1f}%"
+                        if gap_assessment
+                        and gap_assessment["visual_discoloration_percent"] is not None
+                        else gap_assessment["severity_description"]
+                        if gap_assessment and gap_assessment["severity_description"]
+                        else "Not estimable" if gap_assessment
+                        else "N/A"
+                    )
+                )
+                displayed_stage = (
+                    severity_stage if severity_stage != "Not available"
+                    else (
+                        gap_assessment["severity_description"] or "Not estimable"
+                        if gap_assessment else severity_stage
+                    )
+                )
+
+            with st.container(border=True, key="cg-farmer-summary"):
+                guide_key = st.session_state.get("last_disease_guide")
+                management_advisory = st.session_state.get("last_gemini_advisory")
+                if management_advisory:
+                    render_missing_kb_advisory(
+                        management_advisory,
+                        language,
+                        region_resources=active_zone_data.get("resources", []),
+                        hub_label=selected_hub_label,
+                        crop_name=chosen_crop,
+                        guide_key=guide_key,
+                        severity_stage=severity_stage,
+                    )
+                else:
+                    st.subheader(raw_label)
+                    st.write(f"**{T['crop_context_lbl']}** {chosen_crop}")
+                    if st.session_state.get("last_diagnosis_notice"):
+                        st.warning(st.session_state["last_diagnosis_notice"])
+                    st.caption(T["diagnosis_disclaimer"])
+                    st.markdown(f"### {T['treatment_header']}")
+                    if st.session_state.get("last_gemini_advisory_error"):
+                        st.warning(
+                            "Additional crop-management guidance could not be generated. "
+                            "Please try again."
+                        )
+                    if is_healthy_prediction and diagnosis_available and guide_key:
+                        st.markdown(f"**{T['prog_status_lbl']}** `{displayed_stage}`")
+                        if severity_stage.startswith("Stage 3"):
+                            st.error(T["stage3_alert"])
+                        elif severity_stage.startswith("Stage 2"):
+                            st.warning(T["stage2_alert"])
+                        elif severity_stage.startswith("Stage 1"):
+                            st.success(T["stage1_alert"])
+
+                        render_disease_guide(
+                            guide_key,
+                            chosen_crop,
+                            language,
+                            severity_stage,
+                            selected_hub_label,
+                        )
+                    elif diagnosis_available and guide_key:
+                        render_disease_guide(
+                            guide_key,
+                            chosen_crop,
+                            language,
+                            severity_stage,
+                            selected_hub_label,
+                        )
+                    else:
+                        st.info(T.get(
+                            "disease_guide_unavailable",
+                            "No exact crop-compatible knowledge-base match was found for this model class.",
+                        ))
+
+            with st.container(border=True):
+                st.markdown(f"### {T['hub_support_header']} ({selected_hub_label})")
+                st.info(T["hub_support_info"])
+                audio_col, resources_col = st.columns(2, gap="large")
+                with audio_col:
+                    if gap_assessment:
+                        if language == "Kiswahili":
+                            audio_text = (
+                                f"Makadirio ya ziada ambayo hayajathibitishwa kwa "
+                                f"{chosen_crop}: {gap_assessment['assessment']}. "
+                                "Thibitisha kwa afisa wa ugani wa kilimo wa eneo lako."
+                            )
+                        elif language == "French":
+                            audio_text = (
+                                f"Estimation complémentaire non confirmée pour "
+                                f"{chosen_crop} : {gap_assessment['assessment']}. "
+                                "Faites-la confirmer par un conseiller agricole local."
+                            )
+                        else:
+                            audio_text = (
+                                f"Unconfirmed AI follow-up estimate for {chosen_crop}: "
+                                f"{gap_assessment['assessment']}. Ask a local agricultural "
+                                "extension officer to confirm it."
+                            )
+                    elif not diagnosis_available:
+                        if language == "Kiswahili":
+                            audio_text = "Hakuna utambuzi wa kuaminika unaopatikana kwa picha hii."
+                        elif language == "French":
+                            audio_text = "Aucun diagnostic fiable n’est disponible pour cette image."
+                        else:
+                            audio_text = "No reliable diagnosis is available for this image."
+                    elif language == "Kiswahili":
+                        audio_text = (
+                            f"Matokeo ya uchunguzi wa {chosen_crop}: {raw_label}. "
+                            "Fuata hatua za usimamizi na uwasiliane na afisa wa ugani "
+                            "ikiwa dalili zitaendelea."
+                        )
+                    elif language == "French":
+                        audio_text = (
+                            f"Résultat du dépistage pour {chosen_crop}: {raw_label}. "
+                            "Suivez les mesures de gestion et contactez un conseiller "
+                            "agricole si les symptômes persistent."
+                        )
+                    else:
+                        audio_text = (
+                            f"Screening result for {chosen_crop}: {raw_label}. Follow the "
+                            "management steps and contact an extension officer if symptoms persist."
+                        )
+                    render_tts_audio_controls(audio_text, tts_lang)
+                with resources_col:
+                    render_hub_resource_directory(
+                        active_zone_data.get("resources", []),
+                        selected_hub_label,
+                        st.session_state.get("gps_status"),
+                        language,
                     )
 
-        is_active = (uploaded_file is not None)
+            advanced_labels = {
+                "English": "🔬 View Advanced Technical & Model Breakdown",
+                "Kiswahili": "🔬 Tazama Uchambuzi wa Kina wa Kiufundi na Miundo",
+                "French": "🔬 Voir l’analyse technique et les modèles",
+            }
+            with st.expander(
+                advanced_labels.get(
+                    language,
+                    advanced_labels["English"],
+                ),
+                expanded=False,
+            ):
+                st.success(T["analysis_complete_msg"])
+                di.render_log_outcome(st, T, st.session_state.get("last_log_outcome"))
+                if st.session_state.get("last_analysis_error"):
+                    st.error(st.session_state["last_analysis_error"])
+
+                st.subheader(raw_label)
+                st.write(f"**{T['crop_context_lbl']}** {chosen_crop}")
+                metric_col1, metric_col2 = st.columns(2, gap="medium")
+                metric_col1.metric(T["ai_conf_lbl"], confidence_display)
+                metric_col2.metric(T["inf_sev_lbl"], severity_display)
+                if gap_assessment:
+                    render_uncertain_assessment(gap_assessment, language)
+                elif gap_error:
+                    st.warning(
+                        "An additional assessment could not be completed. Please try again."
+                    )
+                confidence_margin = st.session_state.get("last_confidence_margin")
+                if confidence_margin is not None:
+                    st.caption(
+                        f"{T['ai_margin_lbl']}: {float(confidence_margin):.1f}. "
+                        f"{T['quality_confidence_caution']}"
+                    )
+
+                render_consensus_report(
+                    st.session_state.get("last_consensus_report"),
+                    language,
+                    _consensus_configuration(),
+                )
+                render_advisory_technical_analysis(
+                    st.session_state.get("last_gemini_advisory"),
+                    language,
+                )
+
+            if st.button(
+                T["scan_another_btn"],
+                use_container_width=True,
+                key="scan_another_leaf",
+            ):
+                clear_diagnostic_results()
+                st.session_state["selected_crop"] = None
+                st.session_state.pop("diagnostic_crop_selector", None)
+                st.session_state.pop("diagnostic_sample_source", None)
+                st.session_state.pop("file_upload", None)
+                st.session_state.pop("_last_upload_digest", None)
+                st.rerun()
+
+        is_active = uploaded_file is not None or st.session_state.get("analysis_done", False)
         play_state = "paused" if is_active else "running"
 
-        primary_color = "#00897B"
-        accent_green = "#A5D6A7"
-        upload_button_color = "#F57C00" 
-        
-        st.markdown(f"""
+        st.markdown("""
         <style>
-        section.main > div, [data-testid="stSidebar"] > div, .block-container {{
+        section.main > div, [data-testid="stSidebar"] > div, .block-container {
             opacity: 1 !important;
             transition: none !important;
-        }}
-        [data-testid="stSkeleton"] {{
+        }
+        [data-testid="stSkeleton"] {
             display: none !important;
-        }}
+        }
 
-        .bg-container {{
+        .bg-container {
             position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
             z-index: -999;
             background-color: #1E4620;
-        }}
+        }
         
-        .bg-slide {{
+        .bg-slide {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background-size: cover; background-position: center; background-repeat: no-repeat;
             opacity: 0; animation-timing-function: ease-in-out; animation-iteration-count: infinite;
-            animation-duration: 30s; animation-play-state: {play_state}; will-change: transform, opacity;
-        }}
+            animation-duration: 40s; animation-play-state: {play_state}; will-change: transform, opacity;
+        }
         
-        .slide-1 {{ background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1500937386664-56d1dfef3854?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide1; }}
-        .slide-2 {{ background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1625246333195-78d9c38ad449?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide2; }}
-        .slide-3 {{ background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1550989460-0adf9ea622e2?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide3; }}
-        .slide-4 {{ background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1592841202223-1ef5caa383b3?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide4; }}
-        .slide-5 {{ background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1592417817098-8f3d6eb2660d?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide5; }}
+        .slide-1 { background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1500937386664-56d1dfef3854?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide1; }
+        .slide-2 { background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1625246333195-78d9c38ad449?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide2; }
+        .slide-3 { background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1550989460-0adf9ea622e2?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide3; }
+        .slide-4 { background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide4; }
+        .slide-5 { background-image: linear-gradient(rgba(0, 30, 15, 0.7), rgba(0, 15, 5, 0.9)), url("https://images.unsplash.com/photo-1592982537447-7440770cbfc9?auto=format&fit=crop&w=2070&q=80"); animation-name: fadeSlide5; }
 
-        @keyframes fadeSlide1 {{ 0% {{ opacity: 1; transform: scale(1); }} 18% {{ opacity: 1; transform: scale(1.03); }} 24% {{ opacity: 0; transform: scale(1.04); }} 94% {{ opacity: 0; transform: scale(1); }} 100% {{ opacity: 1; transform: scale(1); }} }}
-        @keyframes fadeSlide2 {{ 0% {{ opacity: 0; transform: scale(1); }} 18% {{ opacity: 0; transform: scale(1); }} 24% {{ opacity: 1; transform: scale(1); }} 42% {{ opacity: 1; transform: scale(1.03); }} 48% {{ opacity: 0; transform: scale(1.04); }} 100% {{ opacity: 0; transform: scale(1); }} }}
-        @keyframes fadeSlide3 {{ 0% {{ opacity: 0; transform: scale(1); }} 42% {{ opacity: 0; transform: scale(1); }} 48% {{ opacity: 1; transform: scale(1); }} 66% {{ opacity: 1; transform: scale(1.03); }} 72% {{ opacity: 0; transform: scale(1.04); }} 100% {{ opacity: 0; transform: scale(1); }} }}
-        @keyframes fadeSlide4 {{ 0% {{ opacity: 0; transform: scale(1); }} 66% {{ opacity: 0; transform: scale(1); }} 72% {{ opacity: 1; transform: scale(1); }} 90% {{ opacity: 1; transform: scale(1.03); }} 96% {{ opacity: 0; transform: scale(1.04); }} 100% {{ opacity: 0; transform: scale(1); }} }}
-        @keyframes fadeSlide5 {{ 0% {{ opacity: 0; transform: scale(1); }} 90% {{ opacity: 0; transform: scale(1); }} 96% {{ opacity: 1; transform: scale(1); }} 100% {{ opacity: 1; transform: scale(1.02); }} }}
+        @keyframes fadeSlide1 { 0% { opacity: 1; transform: scale(1); } 16% { opacity: 1; transform: scale(1.03); } 20% { opacity: 0; transform: scale(1.04); } 96% { opacity: 0; transform: scale(1); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes fadeSlide2 { 0% { opacity: 0; transform: scale(1); } 16% { opacity: 0; transform: scale(1.04); } 20% { opacity: 1; transform: scale(1.04); } 36% { opacity: 1; transform: scale(1.01); } 40% { opacity: 0; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
+        @keyframes fadeSlide3 { 0% { opacity: 0; transform: scale(1); } 36% { opacity: 0; transform: scale(1); } 40% { opacity: 1; transform: scale(1); } 56% { opacity: 1; transform: scale(1.03); } 60% { opacity: 0; transform: scale(1.04); } 100% { opacity: 0; transform: scale(1); } }
+        @keyframes fadeSlide4 { 0% { opacity: 0; transform: scale(1); } 56% { opacity: 0; transform: scale(1.04); } 60% { opacity: 1; transform: scale(1.04); } 76% { opacity: 1; transform: scale(1.01); } 80% { opacity: 0; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }
+        @keyframes fadeSlide5 { 0% { opacity: 0; transform: scale(1); } 76% { opacity: 0; transform: scale(1); } 80% { opacity: 1; transform: scale(1); } 96% { opacity: 1; transform: scale(1.03); } 100% { opacity: 0; transform: scale(1.04); } }
 
-        .stApp {{ background: transparent !important; }}
-        .main .block-container {{ background-color: transparent; padding: 2rem 3rem; }}
-        section[data-testid="stSidebar"] {{ background: linear-gradient(180deg, rgba(232, 245, 233, 0.9) 0%, rgba(200, 230, 201, 0.9) 100%); }}
+        .stApp { background: transparent !important; }
+        .main .block-container { background-color: transparent; padding: 2rem 3rem; }
+        section[data-testid="stSidebar"] { background: linear-gradient(180deg, rgba(232, 245, 233, 0.9) 0%, rgba(200, 230, 201, 0.9) 100%); }
+
+        .st-key-cg-farmer-summary {
+            background: rgba(3, 20, 12, 0.98) !important;
+            border: 1px solid rgba(165, 214, 167, 0.72) !important;
+            border-radius: 16px !important;
+            padding: 1.5rem !important;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.62) !important;
+        }
+        .st-key-cg-farmer-summary * {
+            color: #FFFFFF !important;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.95) !important;
+        }
         
-        h1, h2, h3, h4, h5, h6, p, span, li, label, div[data-testid="stMarkdownContainer"] {{
+        h1, h2, h3, h4, h5, h6, p, span, li, label, div[data-testid="stMarkdownContainer"] {
             color: #FFFFFF !important;
             text-shadow: 1px 1px 3px rgba(0,0,0,0.9) !important;
-        }}
+        }
         
-        [data-testid="stVerticalBlock"] [data-testid="stContainer"] {{
+        [data-testid="stVerticalBlock"] [data-testid="stContainer"] {
             background-color: rgba(4, 25, 12, 0.95) !important;
             backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.3) !important;
             border-radius: 14px;
             padding: 1.5rem;
             box-shadow: 0 10px 35px 0 rgba(0, 0, 0, 0.5);
-        }}
+        }
         
-        .stButton>button {{
-            background: linear-gradient(135deg, {primary_color} 0%, #2E7D32 100%);
+        .stButton>button {
+            background: linear-gradient(135deg, #00897B 0%, #2E7D32 100%);
             color: white; border-radius: 8px; border: none; padding: 0.7rem 2rem;
             font-weight: bold; letter-spacing: 0.5px;
             transition: all 0.2s ease;
-        }}
-        .stButton>button:hover {{
+        }
+        .stButton>button:hover {
             background: linear-gradient(135deg, #00695C 0%, #1B5E20 100%);
             transform: translateY(-2px);
-        }}
-        
-        [data-testid="stMetricValue"] {{
-            color: {accent_green} !important; font-weight: 700;
+        }
+        [data-testid="stMetricValue"] {
+            color: #A5D6A7 !important; font-weight: 700;
             text-shadow: 1px 1px 3px rgba(0,0,0,0.95);
-        }}
+        }
         
-        [data-testid="stFileUploader"] {{
+        [data-testid="stFileUploader"] {
             background-color: rgba(15, 40, 22, 0.85); padding: 1rem;
             border-radius: 12px; border: 2px dashed #81C784;
-        }}
+        }
         
-        [data-testid="stFileUploader"] button {{
-            background-color: {upload_button_color} !important;
+        [data-testid="stFileUploader"] button {
+            background-color: #F57C00 !important;
             color: white !important;
             border: none !important;
-        }}
+        }
         </style>
-        
         <div class="bg-container">
             <div class="bg-slide slide-1"></div>
             <div class="bg-slide slide-2"></div>
@@ -4170,24 +5216,15 @@ else:
             <div class="bg-slide slide-4"></div>
             <div class="bg-slide slide-5"></div>
         </div>
-        """, unsafe_allow_html=True)
+        """.replace("{play_state}", play_state), unsafe_allow_html=True)
 
-        if uploaded_file is None or st.session_state['last_language'] != language:
-            st.session_state['analysis_done'] = False
-            st.session_state['last_prediction'] = None
-            st.session_state['last_confidence'] = None
-            st.session_state['last_confidence_margin'] = None
-            st.session_state['last_severity_stage'] = None
-            st.session_state['last_severity_pct'] = None
-            st.session_state['last_diagnosis_notice'] = None
-            st.session_state['last_diagnosis_available'] = False
-            st.session_state['last_language'] = language
-            st.session_state['last_consensus_report'] = None
-
-        if analyze_triggered and uploaded_file is not None:
-            st.session_state['analysis_done'] = True
+        if analyze_triggered and uploaded_file is not None and image is not None and assessment is not None:
             st.session_state['selected_crop'] = selected_crop
-            upload_bytes = uploaded_file.getvalue()
+            st.session_state["last_gemini_advisory"] = None
+            st.session_state["last_gemini_advisory_error"] = None
+            st.session_state["last_gemini_gap_assessment"] = None
+            st.session_state["last_gemini_gap_error"] = None
+            st.session_state["last_analysis_error"] = None
 
             def infer_local_vision():
                 class_indices = supported_class_indices(selected_crop)
@@ -4302,10 +5339,25 @@ else:
 
             consensus_config = _consensus_configuration()
             try:
-                with st.status("Starting parallel diagnostic agents...", expanded=True) as consensus_status:
-                    def update_consensus_status(stage_name, message):
+                with st.status("Starting diagnostic agents...", expanded=True) as consensus_status:
+                    consensus_status.markdown(
+                        '<span class="cg-diagnostic-status-marker" aria-hidden="true"></span>',
+                        unsafe_allow_html=True,
+                    )
+
+                    def update_consensus_status(stage_name, _message):
+                        stage_labels = {
+                            "starting": "Starting crop screening...",
+                            "vision": "Assessing the crop image...",
+                            "local": "Running a local image cross-check...",
+                            "reasoning": "Checking crop and symptom information...",
+                            "arbitration": "Preparing the screening summary...",
+                        }
                         consensus_status.update(
-                            label=f"{stage_name.replace('_', ' ').title()}: {message}",
+                            label=stage_labels.get(
+                                stage_name,
+                                "Processing crop screening...",
+                            ),
                             state="running",
                             expanded=True,
                         )
@@ -4327,24 +5379,99 @@ else:
                     )
                 st.session_state["last_consensus_report"] = report.to_dict()
                 local_metadata = report.local_vision.metadata
+                vision = report.vision
+                diagnosis = vision.primary_diagnosis.strip()
+                normalized_diagnosis = diagnosis.casefold()
+                is_gemini_healthy = (
+                    vision.health_status == "healthy"
+                    or normalized_diagnosis in {"healthy", "no disease", "none"}
+                )
+                has_gemini_diagnosis = (
+                    is_gemini_healthy
+                    or (
+                        vision.health_status in {"diseased", "pest damage"}
+                        and normalized_diagnosis not in {"", "uncertain", "unknown", "not sure"}
+                    )
+                )
+                if vision.error is None and vision.confidence_score > 0:
+                    local_metadata = dict(local_metadata)
+                    diagnosis_crop = vision.detected_crop.strip() or selected_crop
+                    diagnosis_guide_key = (
+                        "healthy" if is_gemini_healthy
+                        else find_disease_guide_key(diagnosis_crop, diagnosis)
+                        if has_gemini_diagnosis else None
+                    )
+                    epidemiological_label = (
+                        disease_guide_data.DISEASES[diagnosis_guide_key]["epi"]
+                        if diagnosis_guide_key and diagnosis_guide_key != "healthy"
+                        else diagnosis if has_gemini_diagnosis and not is_gemini_healthy
+                        else None
+                    )
+                    if is_gemini_healthy:
+                        severity_stage = "No disease class identified"
+                        severity_pct = 0.0
+                        diagnosis_notice = T["healthy_class_msg"]
+                    elif has_gemini_diagnosis:
+                        severity_stage, severity_pct = analyze_leaf_severity(image)
+                        diagnosis_notice = (
+                            T["low_confidence_msg"]
+                            if vision.confidence_score * 100 < MODEL_SCREENING_MIN_SCORE_PCT
+                            else None
+                        )
+                    else:
+                        severity_stage, severity_pct = "Not available", 0.0
+                        diagnosis_notice = T["low_confidence_msg"]
+                    local_metadata.update({
+                        "diagnosis_available": (
+                            has_gemini_diagnosis
+                            and (
+                                is_gemini_healthy
+                                or vision.confidence_score * 100
+                                >= MODEL_SCREENING_MIN_SCORE_PCT
+                            )
+                        ),
+                        "predicted_label": (
+                            f"Healthy {diagnosis_crop}" if is_gemini_healthy
+                            else f"{diagnosis_crop}: {diagnosis}"
+                        ),
+                        "diagnosed_crop": diagnosis_crop,
+                        "confidence_val": vision.confidence_score * 100,
+                        "confidence_margin_val": None,
+                        "severity_stage": severity_stage,
+                        "severity_pct": severity_pct,
+                        "diagnosis_notice": diagnosis_notice,
+                        "disease_guide_key": diagnosis_guide_key,
+                        "epidemiological_label": epidemiological_label,
+                        "health_status": vision.health_status,
+                    })
             except Exception as error:
-                st.error(f"Consensus engine failed; attempting local ONNX screening only: {error}")
+                print(f"Consensus screening failed: {error}")
+                st.session_state["last_analysis_error"] = (
+                    "Image screening encountered an issue; attempting local screening only."
+                )
                 try:
                     local_output = infer_local_vision()
                     local_metadata = local_output.get("metadata", {})
                 except Exception as local_error:
-                    st.error(f"Local ONNX screening also failed: {local_error}")
+                    print(f"Local ONNX screening failed: {local_error}")
+                    st.session_state["last_analysis_error"] += (
+                        "\nLocal screening also failed. Please try another image."
+                    )
                     local_metadata = {}
 
             diagnosis_available = bool(local_metadata.get("diagnosis_available", False))
             predicted_label = local_metadata.get("predicted_label", T["unsupported_crop_msg"])
             confidence_val = float(local_metadata.get("confidence_val", 0.0))
-            confidence_margin_val = float(local_metadata.get("confidence_margin_val", 0.0))
+            raw_confidence_margin = local_metadata.get("confidence_margin_val", 0.0)
+            confidence_margin_val = (
+                float(raw_confidence_margin) if raw_confidence_margin is not None else None
+            )
             stage = local_metadata.get("severity_stage", "Not available")
             pct = float(local_metadata.get("severity_pct", 0.0))
             diagnosis_notice = local_metadata.get("diagnosis_notice", T["unsupported_crop_msg"])
             diagnosis_guide_key = local_metadata.get("disease_guide_key")
             epidemiological_label = local_metadata.get("epidemiological_label")
+            diagnosed_crop = local_metadata.get("diagnosed_crop") or selected_crop
             is_healthy_prediction = (
                 local_metadata.get("health_status") == "healthy"
                 or (
@@ -4352,6 +5479,37 @@ else:
                     and diagnosis_guide_key == "healthy"
                 )
             )
+
+            if not diagnosis_available or stage == "Not available":
+                try:
+                    gap_assessor = getattr(
+                        cropguard_consensus,
+                        "generate_uncertain_diagnostic",
+                        None,
+                    )
+                    if not callable(gap_assessor):
+                        importlib.reload(cropguard_consensus)
+                        gap_assessor = getattr(
+                            cropguard_consensus,
+                            "generate_uncertain_diagnostic",
+                            None,
+                        )
+                    if not callable(gap_assessor):
+                        raise cropguard_consensus.ProviderError(
+                            "Additional assessment is not available. Restart Streamlit "
+                            "to load the updated consensus module."
+                        )
+                    with st.spinner("Completing an additional assessment of the uncertain result..."):
+                        st.session_state["last_gemini_gap_assessment"] = gap_assessor(
+                            image_bytes=upload_bytes,
+                            mime_type=uploaded_file.type or "image/jpeg",
+                            crop=diagnosed_crop,
+                            region=selected_hub_label,
+                            language=language,
+                            config=consensus_config,
+                        )
+                except cropguard_consensus.ProviderError as error:
+                    st.session_state["last_gemini_gap_error"] = str(error)
 
             st.session_state['last_prediction'] = predicted_label
             st.session_state['last_confidence'] = confidence_val
@@ -4361,6 +5519,60 @@ else:
             st.session_state['last_diagnosis_notice'] = diagnosis_notice
             st.session_state['last_diagnosis_available'] = diagnosis_available
             st.session_state['last_disease_guide'] = diagnosis_guide_key
+            consensus_data = st.session_state.get("last_consensus_report") or {}
+            vision_data = consensus_data.get("vision") or {}
+            if not is_healthy_prediction:
+                advisory_diagnosis = (
+                    vision_data.get("primary_diagnosis")
+                    if not vision_data.get("error")
+                    and vision_data.get("confidence_score", 0) > 0
+                    and vision_data.get("primary_diagnosis", "").casefold()
+                    not in {"", "uncertain", "unknown", "not sure"}
+                    else st.session_state.get("last_gemini_gap_assessment", {}).get(
+                        "assessment"
+                    ) or consensus_data.get("primary_diagnosis", predicted_label)
+                )
+                advisory_symptoms = (
+                    vision_data.get("visual_symptoms")
+                    or st.session_state.get("last_gemini_gap_assessment", {}).get("observations")
+                    or []
+                )
+                try:
+                    advisory_generator = getattr(
+                        cropguard_consensus,
+                        "generate_management_advisory",
+                        None,
+                    )
+                    if not callable(advisory_generator):
+                        importlib.reload(cropguard_consensus)
+                        advisory_generator = getattr(
+                            cropguard_consensus,
+                            "generate_management_advisory",
+                            None,
+                        )
+                    if not callable(advisory_generator):
+                        raise cropguard_consensus.ProviderError(
+                            "Crop-management guidance is not available. Restart Streamlit "
+                            "to load the updated consensus module."
+                        )
+                    with st.spinner("Preparing cautious crop-management guidance..."):
+                        st.session_state["last_gemini_advisory"] = (
+                            advisory_generator(
+                                crop=diagnosed_crop,
+                                diagnosis=advisory_diagnosis,
+                                symptoms=advisory_symptoms,
+                                region=selected_hub_label,
+                                language=language,
+                                config=consensus_config,
+                                local_conditions={
+                                    "temperature_c": active_zone_data.get("temp"),
+                                    "relative_humidity_percent": active_zone_data.get("humidity"),
+                                    "regional_risk_note": active_zone_data.get("risk"),
+                                },
+                            )
+                        )
+                except cropguard_consensus.ProviderError as error:
+                    st.session_state["last_gemini_advisory_error"] = str(error)
 
             log_outcome = None
             if diagnosis_available and not is_healthy_prediction:
@@ -4372,7 +5584,7 @@ else:
                         log_outcome["blockers"] = [{"code": "DUPLICATE", "params": {}}]
                     elif log_scan_telemetry(
                         hub_region=selected_hub_label,
-                        target_crop=selected_crop,
+                        target_crop=diagnosed_crop,
                         disease_name=epidemiological_label,
                         confidence=confidence_val,
                         severity_stage=stage,
@@ -4384,100 +5596,10 @@ else:
                         di.release_field_image(fingerprint["sha256"])
                         log_outcome = {"status": "FAILED", "blockers": []}
             st.session_state['last_log_outcome'] = log_outcome
-
-        with right_col:
-            st.markdown("<div id='tour-target-results'></div>", unsafe_allow_html=True)
-            with st.container(border=True):
-                st.markdown(f"### 📊 2. {T['results_header']}")
-                render_consensus_report(
-                    st.session_state.get("last_consensus_report"),
-                    language,
-                )
-                
-                if st.session_state['analysis_done']:
-                    raw_label = st.session_state['last_prediction']
-                    confidence = st.session_state['last_confidence']
-                    chosen_crop = st.session_state['selected_crop']
-                    sev_stage = st.session_state['last_severity_stage']
-                    sev_pct = st.session_state['last_severity_pct']
-                    
-                    st.info(T["analysis_complete_msg"])
-                    di.render_log_outcome(st, T, st.session_state.get('last_log_outcome'))
-                    st.info(f"**{T['crop_context_lbl']}** {chosen_crop}")
-                    if st.session_state.get('last_diagnosis_available'):
-                        st.info(f"**{T['pattern_match_lbl']}** {raw_label}")
-                    if st.session_state.get('last_diagnosis_notice'):
-                        st.warning(st.session_state['last_diagnosis_notice'])
-                    st.caption(T["diagnosis_disclaimer"])
-                    
-                    if st.session_state.get('last_diagnosis_available'):
-                        m_col1, m_col2 = st.columns(2)
-                        m_col1.metric(T["ai_conf_lbl"], f"{confidence:.1f}%")
-                        m_col2.metric(T["inf_sev_lbl"], f"{sev_pct:.1f}%")
-                        confidence_margin = st.session_state.get("last_confidence_margin")
-                        if confidence_margin is not None:
-                            st.caption(
-                                f"{T['ai_margin_lbl']}: {confidence_margin:.1f}. "
-                                f"{T['quality_confidence_caution']}"
-                            )
-                        st.markdown(f"**{T['prog_status_lbl']}** `{sev_stage}`")
-                        render_disease_guide(
-                            st.session_state.get("last_disease_guide"),
-                            chosen_crop,
-                            language,
-                            sev_stage,
-                            selected_hub_label,
-                        )
-                        if not st.session_state.get("last_disease_guide"):
-                            st.info(T.get(
-                                "disease_guide_unavailable",
-                                "No exact crop-compatible knowledge-base match was found for this model class.",
-                            ))
-                    else:
-                        consensus_data = st.session_state.get("last_consensus_report") or {}
-                        consensus_key = consensus_data.get("disease_key")
-                        consensus_guide_key = find_disease_guide_key(
-                            chosen_crop,
-                            consensus_data.get("primary_diagnosis", ""),
-                        )
-                        if consensus_key and consensus_key == consensus_guide_key:
-                            render_disease_guide(
-                                consensus_key,
-                                chosen_crop,
-                                language,
-                                sev_stage or "",
-                                selected_hub_label,
-                            )
-
-                    if not st.session_state.get('last_diagnosis_notice'):
-                        st.markdown("---")
-                        st.markdown(f"### 3. {T['treatment_header']}")
-                        if language == "Kiswahili":
-                            audio_text = f"Matokeo ya uchunguzi wa {chosen_crop}. Ugonjwa uliotambuliwa ni {raw_label} kwa uhakika wa asilimia {confidence:.0f}. Mabadiliko ya rangi yanakadiriwa kuwa asilimia {sev_pct:.0f}."
-                        elif language == "French":
-                            audio_text = f"Résultats du dépistage pour {chosen_crop}. Classe identifiée : {raw_label}, confiance {confidence:.0f} pour cent. Décoloration visible estimée à {sev_pct:.0f} pour cent."
-                        else:
-                            audio_text = f"Screening result for {chosen_crop}: {raw_label}, with {confidence:.1f} percent model confidence. Estimated visible discoloration is {sev_pct:.1f} percent."
-                        if sev_stage.startswith("Stage 3"):
-                            st.error(T["stage3_alert"])
-                        elif sev_stage.startswith("Stage 2"):
-                            st.warning(T["stage2_alert"])
-                        elif sev_stage.startswith("Stage 1"):
-                            st.success(T["stage1_alert"])
-                        render_tts_audio_controls(audio_text, tts_lang)
-
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.markdown(f"### {T['hub_support_header']} ({selected_hub_label})")
-                    st.info(T["hub_support_info"])
-                    
-                    for av in active_zone_data["resources"]:
-                        with st.expander(f"🏪 {av['name']} ({av['location']})"):
-                            st.write(f"**Location / Scope:** {av['location']}")
-                            st.write(f"**Primary Contact:** `{av['contact']}`")
-                            st.write(f"**Specialization:** {av['specialty']}")
-                else:
-                    st.info(T["diagnostic_empty_prompt"])
-                    st.markdown("<br><br><br>", unsafe_allow_html=True)
+            st.session_state["last_language"] = language
+            st.session_state["last_diagnostic_hub"] = selected_hub_label
+            st.session_state["analysis_done"] = True
+            st.rerun()
 
     diagnostic_workflow()
 
@@ -4489,3 +5611,118 @@ st.markdown(
     f"</div>", 
     unsafe_allow_html=True
 )
+
+st.markdown("""
+<style>
+[data-testid="stButton"] button:not([kind="primary"]),
+[data-testid="stFormSubmitButton"] button:not([kind="primary"]),
+[data-testid="stDownloadButton"] button:not([kind="primary"]),
+[data-testid="stPopover"] button:not([kind="primary"]),
+[data-testid="stLinkButton"] a {
+    background: #F3F4F6 !important;
+    color: #111827 !important;
+    text-shadow: none !important;
+}
+[data-testid="stButton"] button:not([kind="primary"]) *,
+[data-testid="stFormSubmitButton"] button:not([kind="primary"]) *,
+[data-testid="stDownloadButton"] button:not([kind="primary"]) *,
+[data-testid="stPopover"] button:not([kind="primary"]) *,
+[data-testid="stLinkButton"] a * {
+    color: #111827 !important;
+    text-shadow: none !important;
+}
+[data-testid="stAlert"],
+[data-testid="stProgress"] {
+    background: #F3F4F6 !important;
+    color: #111827 !important;
+    border: 1px solid #D1D5DB !important;
+    border-radius: 8px;
+}
+[data-testid="stAlert"] *,
+[data-testid="stProgress"] * {
+    color: #111827 !important;
+    text-shadow: none !important;
+}
+[data-testid="stExpander"]:has(.cg-diagnostic-status-marker),
+[data-testid="stExpander"]:has(.cg-diagnostic-status-marker) * {
+    color: #111827 !important;
+    text-shadow: none !important;
+}
+[data-testid="stAlert"] p,
+[data-testid="stAlert"] span,
+[data-testid="stAlert"] label,
+[data-testid="stAlert"] li,
+[data-testid="stAlert"] strong,
+[data-testid="stAlert"] [data-testid="stMarkdownContainer"],
+[data-testid="stProgress"] p,
+[data-testid="stProgress"] span,
+[data-testid="stProgress"] label {
+    color: #111827 !important;
+    text-shadow: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+if app_mode != T["nav_diag"]:
+    st.markdown("""
+    <style>
+    [data-testid="stMain"] [data-testid="stMetric"] {
+        background: rgba(12, 16, 20, 0.96) !important;
+        border: 1px solid rgba(226, 232, 240, 0.22) !important;
+        border-radius: 12px !important;
+        padding: 14px !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28) !important;
+    }
+    [data-testid="stMain"] [data-testid="stMetricLabel"],
+    [data-testid="stMain"] [data-testid="stMetricLabel"] *,
+    [data-testid="stMain"] [data-testid="stMetricValue"],
+    [data-testid="stMain"] [data-testid="stMetricValue"] * {
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+        opacity: 1 !important;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95) !important;
+    }
+    [data-testid="stMain"] [data-testid="stMetricLabel"] {
+        font-weight: 700 !important;
+    }
+    [data-testid="stMain"] [data-testid="stMetricValue"] {
+        font-weight: 800 !important;
+    }
+    [data-testid="stMain"] [data-testid="stChatMessage"] {
+        color: #FFFFFF !important;
+        background: rgba(12, 16, 20, 0.96) !important;
+        border: 1px solid rgba(226, 232, 240, 0.22) !important;
+        border-radius: 12px !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28) !important;
+    }
+    [data-testid="stMain"] [data-testid="stChatMessage"] *,
+    [data-testid="stMain"] [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] *,
+    [data-testid="stMain"] [data-testid="stChatMessage"] p {
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+        opacity: 1 !important;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+if app_mode == T["nav_ai"]:
+    st.markdown("""
+    <style>
+    [data-testid="stMain"] [data-testid="stChatInput"] textarea,
+    [data-testid="stMain"] [data-testid="stChatInputTextArea"] {
+        color: #111827 !important;
+        -webkit-text-fill-color: #111827 !important;
+        background-color: #FFFFFF !important;
+        caret-color: #111827 !important;
+        opacity: 1 !important;
+        text-shadow: none !important;
+    }
+    [data-testid="stMain"] [data-testid="stChatInput"] textarea::placeholder,
+    [data-testid="stMain"] [data-testid="stChatInputTextArea"]::placeholder {
+        color: #4B5563 !important;
+        -webkit-text-fill-color: #4B5563 !important;
+        opacity: 1 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
