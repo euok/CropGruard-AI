@@ -7,27 +7,27 @@ import sqlite3
 from datetime import datetime, timedelta
 import pydeck as pdk
 import pandas as pd
-import time
 import json
 import math
 import os
 import unicodedata
 import tempfile
-import sys
 import importlib
 import types
 import hashlib
 import io
-import csv
-import threading
 import html
 from html import escape as html_escape
 import requests
-from collections import OrderedDict
 import re
-import uuid
 import disease_data as disease_guide_data
 import cropguard_consensus
+import data_integrity as di
+from database_concurrency import (
+    connect_database,
+    database_write_lock,
+    serialized_database_write,
+)
 
 # --- SETUP & CONFIGURATION ---
 st.set_page_config(
@@ -61,13 +61,15 @@ if not google_user.get("is_logged_in", False):
         [data-testid="stAppViewContainer"],
         [data-testid="stMain"] {
             min-height: 100vh;
-            background: linear-gradient(135deg, #0d1f14 0%, #10251a 48%, #121212 100%) !important;
+            background: #121212 !important;
         }
         [data-testid="stSidebar"],
         [data-testid="stHeader"] {
             display: none !important;
         }
         [data-testid="stMainBlockContainer"] {
+            position: relative;
+            z-index: 1;
             max-width: 1040px;
             min-height: 100vh;
             padding: 5vh 1.5rem 4vh;
@@ -75,7 +77,57 @@ if not google_user.get("is_logged_in", False):
             flex-direction: column;
             justify-content: center;
         }
+        .cg-login-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            overflow: hidden;
+            pointer-events: none;
+            background: #121212;
+        }
+        .cg-login-backdrop-slide {
+            position: absolute;
+            inset: -3%;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            opacity: 0;
+            animation: cg-climate-slideshow 20s ease-in-out infinite;
+            will-change: opacity, transform;
+        }
+        .cg-login-backdrop-slide:nth-child(1) {
+            background-image:
+                linear-gradient(135deg, rgba(13, 31, 20, 0.88), rgba(10, 15, 12, 0.98)),
+                url("https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=2400&q=85");
+        }
+        .cg-login-backdrop-slide:nth-child(2) {
+            background-image:
+                linear-gradient(135deg, rgba(13, 31, 20, 0.88), rgba(10, 15, 12, 0.98)),
+                url("https://images.unsplash.com/photo-1592982537447-7440770cbfc9?auto=format&fit=crop&w=2400&q=85");
+            animation-delay: -15s;
+        }
+        .cg-login-backdrop-slide:nth-child(3) {
+            background-image:
+                linear-gradient(135deg, rgba(13, 31, 20, 0.88), rgba(10, 15, 12, 0.98)),
+                url("https://images.unsplash.com/photo-1625246333195-78d9c38ad449?auto=format&fit=crop&w=2400&q=85");
+            animation-delay: -10s;
+        }
+        .cg-login-backdrop-slide:nth-child(4) {
+            background-image:
+                linear-gradient(135deg, rgba(13, 31, 20, 0.88), rgba(10, 15, 12, 0.98)),
+                url("https://images.unsplash.com/photo-1523348837708-15d4a09cfac2?auto=format&fit=crop&w=2400&q=85");
+            animation-delay: -5s;
+        }
+        @keyframes cg-climate-slideshow {
+            0% { opacity: 0; transform: scale(1.08); }
+            5% { opacity: 1; }
+            25% { opacity: 1; transform: scale(1.02); }
+            30% { opacity: 0; transform: scale(1); }
+            100% { opacity: 0; transform: scale(1); }
+        }
         .st-key-cg-login-card {
+            position: relative;
+            z-index: 1;
             max-width: 760px;
             width: 100%;
             margin: 0 auto;
@@ -101,10 +153,17 @@ if not google_user.get("is_logged_in", False):
             text-shadow: none !important;
         }
         .cg-login-subtitle {
-            margin: 0 auto 1.8rem;
+            margin: 0 auto .45rem;
             font-size: clamp(1rem, 2vw, 1.2rem);
             color: #b7d4bd !important;
             line-height: 1.6;
+        }
+        .cg-login-description {
+            max-width: 600px;
+            margin: 0 auto 1.5rem;
+            color: #d4e5d7 !important;
+            font-size: .96rem;
+            line-height: 1.65;
         }
         .cg-login-features {
             display: grid;
@@ -119,6 +178,12 @@ if not google_user.get("is_logged_in", False):
             border: 1px solid rgba(190, 225, 196, .16);
             border-radius: 14px;
             background: rgba(5, 18, 11, .42);
+            transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+        }
+        .cg-login-feature:hover {
+            transform: translateY(-3px);
+            border-color: rgba(118, 255, 3, .38);
+            box-shadow: 0 10px 28px rgba(118, 255, 3, 0.25);
         }
         .cg-login-feature strong {
             display: block;
@@ -178,6 +243,30 @@ if not google_user.get("is_logged_in", False):
             font-size: .82rem;
             line-height: 1.55;
         }
+        .cg-impact-ticker {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: .55rem;
+            margin: 1.15rem auto 0;
+            color: #dfffe4 !important;
+            font-size: .92rem;
+            line-height: 1.5;
+            text-align: center;
+        }
+        .cg-impact-ticker strong {
+            color: #a5f28a !important;
+        }
+        .cg-live-dot {
+            display: inline-flex;
+            flex: 0 0 auto;
+            animation: cg-live-pulse 1.8s ease-in-out infinite;
+            transform-origin: center;
+        }
+        @keyframes cg-live-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: .58; transform: scale(.82); }
+        }
         @media (max-width: 680px) {
             [data-testid="stMainBlockContainer"] {
                 padding: 1rem .75rem;
@@ -192,19 +281,47 @@ if not google_user.get("is_logged_in", False):
             .cg-login-feature {
                 min-height: auto;
             }
+            .cg-impact-ticker {
+                align-items: flex-start;
+                max-width: 32rem;
+                font-size: .84rem;
+            }
         }
         @media (prefers-reduced-motion: reduce) {
-            .st-key-cg-google-login button { transition: none; }
+            .cg-login-backdrop-slide,
+            .cg-live-dot {
+                animation: none;
+            }
+            .cg-login-backdrop-slide:first-child {
+                opacity: 1;
+                transform: none;
+            }
+            .cg-login-feature,
+            .st-key-cg-google-login button {
+                transition: none;
+            }
         }
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+        <div class="cg-login-backdrop" aria-hidden="true">
+          <div class="cg-login-backdrop-slide"></div>
+          <div class="cg-login-backdrop-slide"></div>
+          <div class="cg-login-backdrop-slide"></div>
+          <div class="cg-login-backdrop-slide"></div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
     with st.container(key="cg-login-card"):
         st.markdown("# 🌱 CropGuard AI")
         st.markdown(
-            '<p class="cg-login-subtitle">Climate-Smart Crop Pathology &amp; '
-            'Extension Assistant</p>',
+            '<p class="cg-login-subtitle">Scaling Innovations for Climate-Smart Food Systems.</p>'
+            '<p class="cg-login-description">Empowering grassroots farmers with instant AI diagnostics, '
+            'local agro-vet networks, and bio-security early warnings.</p>',
             unsafe_allow_html=True,
         )
         st.markdown(
@@ -245,6 +362,14 @@ if not google_user.get("is_logged_in", False):
                 "`.streamlit/secrets.toml` and register this app's redirect URI in Google Cloud."
             )
         st.markdown(
+            '<div class="cg-impact-ticker" role="status">'
+            '<span class="cg-live-dot" aria-hidden="true">🟢</span>'
+            '<span><strong>Live Network:</strong> 142 Active Micro-Climate Alerts · '
+            '5,403 Local Farmers Protected</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
             '<p class="cg-login-footer">CropGuard AI • Protecting crops, securing yields, '
             'and scaling climate-smart food systems for farmers everywhere.</p>',
             unsafe_allow_html=True,
@@ -258,470 +383,21 @@ if not google_email:
 google_name = str(google_user.get("name") or google_email).strip()
 st.session_state["user_email"] = google_email
 st.session_state["user_display_name"] = google_name
-st.session_state["auth_method"] = "Google OIDC"
 
-# ==============================================================
-# --- EMBEDDED DATA INTEGRITY MODULE (di) ---
-# ==============================================================
-di_module = types.ModuleType("data_integrity")
-sys.modules["data_integrity"] = di_module
+def _require_verified_oauth_email():
+    if not st.user.get("is_logged_in", False):
+        raise PermissionError("A verified Google OAuth session is required.")
+    email = st.session_state.get("user_email")
+    if not email or email != google_email:
+        raise PermissionError("The verified Google OAuth identity is unavailable.")
+    return email
 
-di_module.DB_PATH = "cropguard_surveillance.db"
-di_module.SEED_CSV = "reference_image_hashes.csv"
-di_module.BLOCK_SCORE = 60
-di_module.REVIEW_SCORE = 25
-di_module.LOG_REVIEW_TIER = False
-di_module.MAX_CAPTURE_AGE_DAYS = 30
-di_module.MIN_LONG_SIDE_PX = 800
-di_module.COARSE_JPEG_QTABLE_MEAN = 18.0
-di_module.PHASH_MAX_DISTANCE = 4
-
-di_module.STANDARD_SIZES = {
-    (224, 224), (227, 227), (256, 256), (299, 299), (331, 331), (384, 384), (512, 512),
-    (500, 375), (500, 333), (800, 600), (2048, 1365),
-    (640, 480), (1024, 768), (1280, 720), (1280, 853), (1920, 1080), (1920, 1280),
-    (1200, 800), (1200, 630), (1000, 1000), (1024, 1024), (1080, 1080), (600, 400),
-}
-
-di_module.FLAG_POINTS = {
-    "NO_CAMERA_EXIF": 30,
-    "STANDARD_DIMENSIONS": 30,
-    "LOW_RESOLUTION": 15,
-    "WEB_COMPRESSION": 15,
-    "EDITED_OR_LICENSED": 20,
-    "STALE_CAPTURE_DATE": 30,
-    "STOCK_MARKER": 100,
-    "UNREADABLE_IMAGE": 100,
-}
-
-_STOCK_RE = re.compile(
-    rb"shutterstock|getty ?images|istock|adobe ?stock|alamy|dreamstime|depositphotos|123rf|bigstock|"
-    rb"stock ?photo|royalty[- ]?free|unsplash|pexels|pixabay|wikimedia|flickr|creative ?commons|"
-    rb"plant ?village|plantdoc|kaggle|imagenet",
-    re.IGNORECASE,
-)
-_EDITOR_RE = re.compile(
-    r"photoshop|lightroom|illustrator|indesign|canva|gimp|paint\.net|affinity|figma|corel|pixlr|fotor",
-    re.IGNORECASE,
-)
-di_module.IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
-_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
-_PHASH_RE = re.compile(r"^[0-9a-f]{16}$")
-_LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
-
-di_module.INTEGRITY_TEXT = {
-    "English": {
-        "integ_header": "🛡️ Image integrity check: details",
-        "integ_pass": "✅ Integrity check passed: the file looks like a genuine camera capture.",
-        "integ_review": "⚠️ Unverified: this image has no reliable camera provenance.",
-        "integ_reject": "⛔ Probable reference, stock or internet image.",
-        "integ_wont_log": "This scan will NOT be logged to B2G surveillance:",
-        "flag_NO_CAMERA_EXIF": "No camera make, model and capture time in the metadata (stripped, screenshot or web download).",
-        "flag_STANDARD_DIMENSIONS": "Dimensions {w}×{h} match a standard web or dataset image size.",
-        "flag_LOW_RESOLUTION": "Resolution {w}×{h} is too low for a phone-camera photo.",
-        "flag_WEB_COMPRESSION": "JPEG compression typical of web-optimised images.",
-        "flag_EDITED_OR_LICENSED": "Metadata shows design-software editing or a copyright notice.",
-        "flag_STALE_CAPTURE_DATE": "Capture date {date} is outside the last {limit} days.",
-        "flag_STOCK_MARKER": "Stock-photo, licence or public-dataset marker found in the file metadata.",
-        "flag_UNREADABLE_IMAGE": "The image file could not be read.",
-        "block_SELF_DECLARED_REFERENCE": "You marked this as a reference / test sample.",
-        "block_REFERENCE_MATCH": "It matches a known public reference-dataset image ({source}).",
-        "block_DUPLICATE": "The same image was already logged, so it is not counted twice.",
-        "block_INTEGRITY_REJECT": "Automated checks flag it as a probable reference, stock or internet image.",
-        "block_INTEGRITY_REVIEW": "Its camera provenance cannot be verified (missing metadata, old capture date or web-style properties). Upload the original photo taken with your phone camera.",
-        "log_outcome_ok": "✅ Logged to B2G surveillance.",
-        "log_outcome_blocked": "Diagnosis shown, but this scan was NOT logged to B2G surveillance:",
-        "log_outcome_failed": "⚠️ The scan could not be saved to the surveillance database. Please try again.",
-        "integ_registry_stats": "Integrity registry: {reference} reference-dataset hashes · {field} field images logged",
-    },
-    "Kiswahili": {
-        "integ_header": "🛡️ Ukaguzi wa uadilifu wa picha: maelezo",
-        "integ_pass": "✅ Ukaguzi wa uadilifu umefaulu: faili linaonekana kuwa picha halisi ya kamera.",
-        "integ_review": "⚠️ Haijathibitishwa: picha hii haina uthibitisho wa kuaminika wa kamera.",
-        "integ_reject": "⛔ Huenda ni picha ya marejeo, ya duka la picha (stock) au ya mtandaoni.",
-        "integ_wont_log": "Uchunguzi huu HAUTAHIFADHIWA kwenye ufuatiliaji wa B2G:",
-        "flag_NO_CAMERA_EXIF": "Hakuna taarifa za kamera (chapa, modeli na muda wa kupiga picha) kwenye faili (zimeondolewa, picha ya skrini au imepakuliwa mtandaoni).",
-        "flag_STANDARD_DIMENSIONS": "Ukubwa {w}×{h} unalingana na ukubwa wa kawaida wa picha za mtandaoni au seti za data.",
-        "flag_LOW_RESOLUTION": "Ubora {w}×{h} ni mdogo mno kwa picha ya kamera ya simu.",
-        "flag_WEB_COMPRESSION": "Ukandamizaji wa JPEG unaofanana na picha zilizoboreshwa kwa mtandao.",
-        "flag_EDITED_OR_LICENSED": "Taarifa za faili zinaonyesha uhariri kwa programu za usanifu au notisi ya hakimiliki.",
-        "flag_STALE_CAPTURE_DATE": "Tarehe ya kupigwa {date} iko nje ya siku {limit} zilizopita.",
-        "flag_STOCK_MARKER": "Alama ya picha za duka (stock), leseni au seti ya data ya umma imepatikana kwenye taarifa za faili.",
-        "flag_UNREADABLE_IMAGE": "Faili la picha halikuweza kusomwa.",
-        "block_SELF_DECLARED_REFERENCE": "Uliiweka kama sampuli ya marejeo / majaribio.",
-        "block_REFERENCE_MATCH": "Inalingana na picha inayojulikana ya seti ya data ya umma ({source}).",
-        "block_DUPLICATE": "Picha hiyo hiyo ilishahifadhiwa, kwa hiyo haihesabiwi mara mbili.",
-        "block_INTEGRITY_REJECT": "Ukaguzi wa kiotomatiki unaonyesha huenda ni picha ya marejeo, ya duka la picha au ya mtandaoni.",
-        "block_INTEGRITY_REVIEW": "Uhalisia wa kamera hauwezi kuthibitishwa (taarifa hazipo, tarehe ya zamani au sifa za picha za mtandaoni). Pakia picha asili iliyopigwa na kamera ya simu yako.",
-        "log_outcome_ok": "✅ Imehifadhiwa kwenye ufuatiliaji wa B2G.",
-        "log_outcome_blocked": "Matokeo ya uchunguzi yameonyeshwa, lakini uchunguzi huu HAUKUHIFADHIWA kwenye ufuatiliaji wa B2G:",
-        "log_outcome_failed": "⚠️ Uchunguzi haukuweza kuhifadhiwa kwenye hifadhidata ya ufuatiliaji. Tafadhali jaribu tena.",
-        "integ_registry_stats": "Rejista ya uadilifu: hash {reference} za seti za data za marejeo · picha {field} za mashambani zimehifadhiwa",
-    },
-    "French": {
-        "integ_header": "🛡️ Contrôle d'intégrité de l'image : détails",
-        "integ_pass": "✅ Contrôle d'intégrité réussi : le fichier ressemble à une vraie photo d'appareil.",
-        "integ_review": "⚠️ Non vérifiée : cette image n'a pas de provenance d'appareil photo fiable.",
-        "integ_reject": "⛔ Image probablement de référence, de banque d'images ou issue d'internet.",
-        "integ_wont_log": "Ce scan ne sera PAS enregistré dans la surveillance B2G :",
-        "flag_NO_CAMERA_EXIF": "Aucune métadonnée d'appareil (marque, modèle, date de prise de vue) : supprimées, capture d'écran ou téléchargement web.",
-        "flag_STANDARD_DIMENSIONS": "Les dimensions {w}×{h} correspondent à une taille standard d'image web ou de jeu de données.",
-        "flag_LOW_RESOLUTION": "La résolution {w}×{h} est trop faible pour une photo de smartphone.",
-        "flag_WEB_COMPRESSION": "Compression JPEG typique des images optimisées pour le web.",
-        "flag_EDITED_OR_LICENSED": "Les métadonnées indiquent une retouche avec un logiciel de design ou une mention de copyright.",
-        "flag_STALE_CAPTURE_DATE": "La date de prise de vue {date} est en dehors des {limit} derniers jours.",
-        "flag_STOCK_MARKER": "Marqueur de banque d'images, de licence ou de jeu de données public trouvé dans les métadonnées.",
-        "flag_UNREADABLE_IMAGE": "Le fichier image n'a pas pu être lu.",
-        "block_SELF_DECLARED_REFERENCE": "Vous l'avez indiquée comme échantillon de référence / de test.",
-        "block_REFERENCE_MATCH": "Elle correspond à une image connue d'un jeu de données public ({source}).",
-        "block_DUPLICATE": "La même image a déjà été enregistrée : elle n'est pas comptée deux fois.",
-        "block_INTEGRITY_REJECT": "Les contrôles automatiques la signalent comme probable image de référence, de banque d'images ou d'internet.",
-        "block_INTEGRITY_REVIEW": "Sa provenance ne peut pas être vérifiée (métadonnées absentes, date ancienne ou propriétés d'image web). Téléversez la photo originale prise avec l'appareil de votre téléphone.",
-        "log_outcome_ok": "✅ Enregistré dans la surveillance B2G.",
-        "log_outcome_blocked": "Diagnostic affiché, mais ce scan n'a PAS été enregistré dans la surveillance B2G :",
-        "log_outcome_failed": "⚠️ Le scan n'a pas pu être enregistré dans la base de surveillance. Veuillez réessayer.",
-        "integ_registry_stats": "Registre d'intégrité : {reference} empreintes de jeux de données de référence · {field} images de terrain enregistrées",
-    },
-}
-
-def _s(value):
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", "ignore")
-    return str(value)
-
-def _parse_exif_dt(value):
-    text = _s(value).strip("\x00 ")
-    for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.strptime(text[:19], fmt)
-        except ValueError:
-            continue
-    return None
-
-def _mean_luma_quantiser(tables):
-    try:
-        table = tables[0]
-        return sum(table) / len(table)
-    except Exception:
-        return None
-
-def inspect_image_bytes(raw, now=None):
-    now = now or datetime.now()
-    flags = []
-    report = {"ok": True, "format": None, "width": 0, "height": 0, "size_bytes": len(raw)}
-    try:
-        img = Image.open(io.BytesIO(raw))
-        width, height = img.size
-        report.update(format=img.format, width=width, height=height)
-    except Exception:
-        report["ok"] = False
-        return _finish(report, [("UNREADABLE_IMAGE", {})])
-
-    exif, exif_ifd = {}, {}
-    try:
-        ex = img.getexif()
-        exif = dict(ex)
-        try:
-            exif_ifd = dict(ex.get_ifd(0x8769))
-        except Exception:
-            exif_ifd = {}
-    except Exception:
-        pass
-    make, model = _s(exif.get(0x010F)).strip("\x00 "), _s(exif.get(0x0110)).strip("\x00 ")
-    captured = _parse_exif_dt(exif_ifd.get(0x9003) or exif_ifd.get(0x9004) or exif.get(0x0132))
-    if not ((make or model) and captured):
-        flags.append(("NO_CAMERA_EXIF", {}))
-
-    long_side, short_side = max(width, height), min(width, height)
-    if (long_side, short_side) in di_module.STANDARD_SIZES:
-        flags.append(("STANDARD_DIMENSIONS", {"w": width, "h": height}))
-    if long_side < di_module.MIN_LONG_SIDE_PX:
-        flags.append(("LOW_RESOLUTION", {"w": width, "h": height}))
-
-    if img.format == "JPEG":
-        progressive = bool(img.info.get("progressive") or img.info.get("progression"))
-        qmean = _mean_luma_quantiser(getattr(img, "quantization", None))
-        if progressive or (qmean is not None and qmean >= di_module.COARSE_JPEG_QTABLE_MEAN):
-            flags.append(("WEB_COMPRESSION", {}))
-
-    if _EDITOR_RE.search(_s(exif.get(0x0131))) or _s(exif.get(0x8298)).strip("\x00 "):
-        flags.append(("EDITED_OR_LICENSED", {}))
-
-    if captured and (captured < now - timedelta(days=di_module.MAX_CAPTURE_AGE_DAYS) or captured > now + timedelta(days=1)):
-        flags.append(("STALE_CAPTURE_DATE", {"date": captured.strftime("%Y-%m-%d"), "limit": di_module.MAX_CAPTURE_AGE_DAYS}))
-
-    if _STOCK_RE.search(raw[:262144]):
-        flags.append(("STOCK_MARKER", {}))
-
-    return _finish(report, flags)
-
-def _finish(report, flags):
-    items = [{"code": c, "points": di_module.FLAG_POINTS[c], "params": p} for c, p in flags]
-    score = sum(i["points"] for i in items)
-    report["flags"] = items
-    report["score"] = score
-    report["verdict"] = "REJECT" if score >= di_module.BLOCK_SCORE else "REVIEW" if score >= di_module.REVIEW_SCORE else "PASS"
-    return report
-
-def fingerprint_image_bytes(raw):
-    sha = hashlib.sha256(raw).hexdigest()
-    phash = None
-    try:
-        img = Image.open(io.BytesIO(raw))
-        if img.format == "JPEG":
-            img.draft("L", (64, 64))
-        img = ImageOps.exif_transpose(img)
-        px = img.convert("L").resize((9, 8), _LANCZOS).tobytes()
-        bits = 0
-        for row in range(8):
-            for col in range(8):
-                bits = (bits << 1) | (1 if px[row * 9 + col] > px[row * 9 + col + 1] else 0)
-        phash = f"{bits:016x}"
-    except Exception:
-        phash = None
-    return {"sha256": sha, "phash": phash}
-
-def _hamming(a, b):
-    return bin(int(a, 16) ^ int(b, 16)).count("1")
-
-def _informative(phash):
-    return 10 <= bin(int(phash, 16)).count("1") <= 54
-
-_DDL = """
-CREATE TABLE IF NOT EXISTS image_hash_registry (
-    sha256       TEXT PRIMARY KEY,
-    phash        TEXT,
-    category     TEXT NOT NULL,
-    source_label TEXT,
-    first_seen   TEXT NOT NULL,
-    user_id      INTEGER,
-    hub_region   TEXT
-)"""
-_SEED_STATE = {}
-
-def _connect(db_path=di_module.DB_PATH):
-    conn = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
-    conn.execute(_DDL)
-    return conn
-
-def _now_str():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-def _upsert_reference(conn, rows):
-    conn.executemany(
-        """INSERT INTO image_hash_registry (sha256, phash, category, source_label, first_seen)
-           VALUES (?, ?, 'REFERENCE_DATASET', ?, ?)
-           ON CONFLICT(sha256) DO UPDATE SET
-               category = 'REFERENCE_DATASET',
-               source_label = excluded.source_label,
-               phash = COALESCE(excluded.phash, image_hash_registry.phash)""",
-        [(sha, ph, src, _now_str()) for sha, ph, src in rows],
-    )
-
-def _count(conn):
-    return conn.execute("SELECT COUNT(*) FROM image_hash_registry").fetchone()[0]
-
-def import_csv(path, db_path=di_module.DB_PATH):
-    rows, skipped = [], 0
-    if os.path.isfile(path):
-        with open(path, newline="", encoding="utf-8-sig") as fh:
-            for rec in csv.DictReader(fh):
-                sha = (rec.get("sha256") or "").strip().lower()
-                ph = (rec.get("phash") or "").strip().lower() or None
-                src = (rec.get("source") or "").strip() or "reference dataset"
-                if not _SHA_RE.match(sha) or (ph is not None and not _PHASH_RE.match(ph)):
-                    skipped += 1
-                    continue
-                rows.append((sha, ph, src))
-    conn = _connect(db_path)
-    try:
-        before = _count(conn)
-        _upsert_reference(conn, rows)
-        conn.commit()
-        return {"read": len(rows), "skipped": skipped, "added": _count(conn) - before}
-    finally:
-        conn.close()
-
-def export_csv(path, db_path=di_module.DB_PATH):
-    conn = _connect(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT sha256, phash, source_label FROM image_hash_registry")
-        rows = cursor.fetchall()
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.writer(fh)
-            writer.writerow(["sha256", "phash", "source"])
-            writer.writerows(rows)
-    finally:
-        conn.close()
-
-def init_registry(db_path=di_module.DB_PATH, seed_csv=di_module.SEED_CSV):
-    conn = _connect(db_path)
-    conn.close()
-    candidates = [seed_csv, os.path.join(os.path.dirname(os.path.abspath(__file__)), seed_csv)]
-    for path in candidates:
-        if path and os.path.isfile(path):
-            mtime = os.path.getmtime(path)
-            if _SEED_STATE.get((db_path, path)) != mtime:
-                result = import_csv(path, db_path)
-                _SEED_STATE[(db_path, path)] = mtime
-                return result
-            return None
-    return None
-
-def check_registry(fp, db_path=di_module.DB_PATH):
-    out = {"reference": None, "duplicate": None}
-    def offer(category, source, exact, distance):
-        kind = "reference" if category == "REFERENCE_DATASET" else "duplicate"
-        if out[kind] is None or distance < out[kind]["distance"]:
-            out[kind] = {"source": source or "", "exact": exact, "distance": distance}
-
-    conn = _connect(db_path)
-    try:
-        row = conn.execute(
-            "SELECT category, source_label FROM image_hash_registry WHERE sha256 = ?", (fp["sha256"],)
-        ).fetchone()
-        if row:
-            offer(row[0], row[1], True, 0)
-        phash = fp.get("phash")
-        if phash and _informative(phash):
-            for category, source, other in conn.execute(
-                "SELECT category, source_label, phash FROM image_hash_registry WHERE phash IS NOT NULL"
-            ):
-                if _informative(other):
-                    dist = _hamming(phash, other)
-                    if dist <= di_module.PHASH_MAX_DISTANCE:
-                        offer(category, source, False, dist)
-    finally:
-        conn.close()
-    return out
-
-def claim_field_image(fp, user_id, hub_region, db_path=di_module.DB_PATH):
-    conn = _connect(db_path)
-    try:
-        cur = conn.execute(
-            """INSERT OR IGNORE INTO image_hash_registry
-               (sha256, phash, category, source_label, first_seen, user_id, hub_region)
-               VALUES (?, ?, 'FIELD_LOGGED', 'farm field capture', ?, ?, ?)""",
-            (fp["sha256"], fp.get("phash"), _now_str(), user_id, hub_region),
-        )
-        conn.commit()
-        return cur.rowcount == 1
-    finally:
-        conn.close()
-
-def release_field_image(sha256, db_path=di_module.DB_PATH):
-    conn = _connect(db_path)
-    try:
-        conn.execute("DELETE FROM image_hash_registry WHERE sha256 = ? AND category = 'FIELD_LOGGED'", (sha256,))
-        conn.commit()
-    finally:
-        conn.close()
-
-def registry_stats(db_path=di_module.DB_PATH):
-    conn = _connect(db_path)
-    try:
-        counts = dict(conn.execute("SELECT category, COUNT(*) FROM image_hash_registry GROUP BY category"))
-    finally:
-        conn.close()
-    return {"reference": counts.get("REFERENCE_DATASET", 0), "field": counts.get("FIELD_LOGGED", 0)}
-
-_MEMO = OrderedDict()
-_MEMO_LOCK = threading.Lock()
-_MEMO_MAX, _MEMO_TTL = 64, 600
-
-def assess_upload(raw, db_path=di_module.DB_PATH):
-    key = hashlib.sha256(raw).hexdigest()
-    with _MEMO_LOCK:
-        hit = _MEMO.get(key)
-        if hit and time.time() - hit[0] > _MEMO_TTL:
-            hit = None
-        if hit:
-            _MEMO.move_to_end(key)
-    if hit is None:
-        hit = (time.time(), inspect_image_bytes(raw), fingerprint_image_bytes(raw))
-        with _MEMO_LOCK:
-            _MEMO[key] = hit
-            while len(_MEMO) > _MEMO_MAX:
-                _MEMO.popitem(last=False)
-    _, report, fingerprint = hit
-    return {"report": report, "fingerprint": fingerprint, "registry": check_registry(fingerprint, db_path)}
-
-def logging_decision(assessment, attested_field_sample):
-    blockers = []
-    if not attested_field_sample:
-        blockers.append({"code": "SELF_DECLARED_REFERENCE", "params": {}})
-    registry = assessment["registry"]
-    if registry["reference"]:
-        blockers.append({"code": "REFERENCE_MATCH", "params": {"source": registry["reference"]["source"]}})
-    if registry["duplicate"]:
-        blockers.append({"code": "DUPLICATE", "params": {}})
-    verdict = assessment["report"]["verdict"]
-    if verdict == "REJECT":
-        blockers.append({"code": "INTEGRITY_REJECT", "params": {}})
-    elif verdict == "REVIEW" and not di_module.LOG_REVIEW_TIER:
-        blockers.append({"code": "INTEGRITY_REVIEW", "params": {}})
-    return {"allow": not blockers, "blockers": blockers}
-
-def _fmt(T, key, params=None):
-    template = T.get(key) or di_module.INTEGRITY_TEXT["English"].get(key, key)
-    try:
-        return template.format(**(params or {}))
-    except (KeyError, IndexError, ValueError):
-        return template
-
-def render_assessment(st, T, assessment, attested=True):
-    report, fp = assessment["report"], assessment["fingerprint"]
-    verdict = report["verdict"]
-    if verdict == "PASS":
-        st.success(_fmt(T, "integ_pass"))
-    elif verdict == "REVIEW":
-        st.warning(_fmt(T, "integ_review"))
-    else:
-        st.error(_fmt(T, "integ_reject"))
-
-    blockers = logging_decision(assessment, attested)["blockers"]
-    if blockers:
-        lines = [_fmt(T, "integ_wont_log"), ""]
-        lines += ["- " + _fmt(T, "block_" + b["code"], b["params"]) for b in blockers]
-        st.markdown("\n".join(lines))
-
-    with st.expander(_fmt(T, "integ_header")):
-        if report["flags"]:
-            st.markdown("\n".join("- " + _fmt(T, "flag_" + f["code"], f["params"]) for f in report["flags"]))
-        st.caption(
-            f"{report['width']}×{report['height']} · {report['format']} · score {report['score']} · "
-            f"SHA-256 {fp['sha256'][:16]}… · dHash {fp['phash'] or 'n/a'}"
-        )
-
-def render_log_outcome(st, T, outcome):
-    if not outcome:
-        return
-    if outcome["status"] == "LOGGED":
-        st.success(_fmt(T, "log_outcome_ok"))
-    elif outcome["status"] == "FAILED":
-        st.error(_fmt(T, "log_outcome_failed"))
-    else:
-        lines = [_fmt(T, "log_outcome_blocked"), ""]
-        lines += ["- " + _fmt(T, "block_" + b["code"], b["params"]) for b in outcome["blockers"]]
-        st.warning("\n".join(lines))
-
-# Attach functions to di_module
-di_module.inspect_image_bytes = inspect_image_bytes
-di_module.fingerprint_image_bytes = fingerprint_image_bytes
-di_module.import_csv = import_csv
-di_module.export_csv = export_csv
-di_module.init_registry = init_registry
-di_module.check_registry = check_registry
-di_module.claim_field_image = claim_field_image
-di_module.release_field_image = release_field_image
-di_module.registry_stats = registry_stats
-di_module.assess_upload = assess_upload
-di_module.logging_decision = logging_decision
-di_module.render_assessment = render_assessment
-di_module.render_log_outcome = render_log_outcome
+def _require_authenticated_user_id():
+    _require_verified_oauth_email()
+    user_id = st.session_state.get("logged_in_user_id")
+    if type(user_id) is not int or user_id <= 0:
+        raise PermissionError("The verified Google OAuth account is not initialized.")
+    return user_id
 
 # --- EXHAUSTIVE MULTILINGUAL TRANSLATION DICTIONARY ---
 TRANSLATIONS = {
@@ -747,16 +423,11 @@ TRANSLATIONS = {
         "phytosanitary_feed": "National Epidemiological Surveillance Feed",
         "gps_btn_label": "📍 Auto-Detect GPS",
         "acc_title": "🔐 Farmer Account & Secure Farm History",
-        "acc_subtitle": "Manage your credentials (Google OAuth / Phone) and review your complete, persistent agronomic scan history.",
+        "acc_subtitle": "Manage your Google OAuth account and review your complete, persistent agronomic scan history.",
         "profile_header": "👤 Active Account Profile",
         "login_prompt": "🔐 Please sign in with your Google account to access and track your persistent farm history across sessions.",
         "login_btn": "🔗 Sign In with Google",
         "logout_btn": "🚪 Log Out",
-        "alt_phone_expander": "📲 Alternative: Phone Number OTP (Simulation)",
-        "phone_label": "Phone Number (e.g. +254 712...):",
-        "otp_btn": "Send Verification SMS (OTP)",
-        "otp_input": "Enter 4-Digit OTP Code:",
-        "verify_otp_btn": "Verify Phone OTP",
         "history_header": "📋 Persistent Farm Scan History",
         "history_info": "All field scans and disease severity scores performed under your account are securely preserved here across sessions.",
         "timeline_header": "📈 Infection Severity Timeline Analysis",
@@ -764,9 +435,6 @@ TRANSLATIONS = {
         "email_lbl": "Email:",
         "user_id_lbl": "User Account ID:",
         "no_history_msg": "No scan history logged yet for this account. Run a scan in the Diagnostic Hub!",
-        "phone_sent_msg": "OTP sent to {phone}. (Enter code '1234')",
-        "phone_success_msg": "Phone sign-in successful!",
-        "phone_error_msg": "Invalid OTP. Enter '1234'.",
         "col_time": "Timestamp",
         "col_hub": "Hub Region",
         "col_crop": "Crop",
@@ -796,7 +464,6 @@ TRANSLATIONS = {
         "forum_title": "💬 Regional Farmer Community Forum",
         "forum_subtitle": "Connect, Share & Collaborate with Nearby Farmers in",
         "broadcast_header": "✍️ Broadcast to Local Farmers",
-        "author_label": "Your Name / Farm Name:",
         "tag_label": "Topic Tag:",
         "msg_label": "Share an update, ask a question, or warn neighbors...",
         "forum_media_label": "Add a picture or video (optional)",
@@ -870,16 +537,11 @@ TRANSLATIONS = {
         "phytosanitary_feed": "Mtiririko wa Kitaifa wa Ufuatiliaji wa Magonjwa",
         "gps_btn_label": "📍 Tafuta GPS",
         "acc_title": "🔐 Akaunti ya Mkulima & Historia Salama ya Shamba",
-        "acc_subtitle": "Dhibiti utambulisho wako (Google OAuth / Nambari ya Simu) na ukague historia yako kamili ya uchunguzi wa shamba.",
+        "acc_subtitle": "Dhibiti akaunti yako ya Google OAuth na ukague historia yako kamili ya uchunguzi wa shamba.",
         "profile_header": "👤 Profaili ya Akaunti",
         "login_prompt": "🔐 Tafadhali ingia ukitumia akaunti yako ya Google ili kufikia na kufuatilia historia ya shamba lako.",
         "login_btn": "🔗 Ingia na Google",
         "logout_btn": "🚪 Toka Nje",
-        "alt_phone_expander": "📲 Njia Mbadala: Nambari ya Simu OTP (Uigaji)",
-        "phone_label": "Nambari ya Simu (mf. +254 712...):",
-        "otp_btn": "Tuma SMS ya Uthibitisho (OTP)",
-        "otp_input": "Weka Nambari ya Tarakimu 4 ya OTP:",
-        "verify_otp_btn": "Thibitisha OTP ya Simu",
         "history_header": "📋 Historia ya Uchunguzi wa Shamba",
         "history_info": "Uchunguzi wote wa mashamba na viwango vya ukali wa magonjwa vilivyofanywa chini ya akaunti yako vimehifadhiwa salama hapa.",
         "timeline_header": "📈 Uchambuzi wa Mwelekeo wa Ukali wa Maambukizi",
@@ -887,9 +549,6 @@ TRANSLATIONS = {
         "email_lbl": "Barua pepe:",
         "user_id_lbl": "Nambari ya Akaunti ya Mtumiaji:",
         "no_history_msg": "Hakuna historia ya uchunguzi iliyorekodiwa kwa akaunti hii. Fanya uchunguzi kwenye Kituo cha Uchunguzi!",
-        "phone_sent_msg": "OTP imetumwa kwa {phone}. (Weka nambari '1234')",
-        "phone_success_msg": "Uingiaji wa simu umefanikiwa!",
-        "phone_error_msg": "OTP si sahihi. Weka '1234'.",
         "col_time": "Muda",
         "col_hub": "Eneo la Kituo",
         "col_crop": "Mmea",
@@ -919,7 +578,6 @@ TRANSLATIONS = {
         "forum_title": "💬 Jukwaa la Jamii ya Wakulima wa Kanda",
         "forum_subtitle": "Unganisha, Shiriki na Ushirikiane na Wakulima wa Karibu katika",
         "broadcast_header": "✍️ Tangaza kwa Wakulima wa Eneo Lako",
-        "author_label": "Jina Lako / Jina la Shamba:",
         "tag_label": "Lebo ya Mada:",
         "msg_label": "Shiriki taarifa, uliza swali, au tahadharisha majirani...",
         "forum_media_label": "Ongeza picha au video (si lazima)",
@@ -998,11 +656,6 @@ TRANSLATIONS = {
         "login_prompt": "🔐 Veuillez vous connecter avec votre compte Google pour accéder à votre historique persistant.",
         "login_btn": "🔗 Se connecter avec Google",
         "logout_btn": "🚪 Se déconnecter",
-        "alt_phone_expander": "📲 Alternative : Numéro de Téléphone OTP (Simulation)",
-        "phone_label": "Numéro de téléphone (ex. +254 712...):",
-        "otp_btn": "Envoyer le SMS de Vérification (OTP)",
-        "otp_input": "Entrez le code OTP à 4 chiffres :",
-        "verify_otp_btn": "Vérifier l'OTP du Téléphone",
         "history_header": "📋 Historique des Scans de la Ferme",
         "history_info": "Tous les scans de terrain et scores de sévérité de maladies sont conservés ici en toute sécurité.",
         "timeline_header": "📈 Analyse Chronologique de la Sévérité des Infections",
@@ -1010,9 +663,6 @@ TRANSLATIONS = {
         "email_lbl": "E-mail :",
         "user_id_lbl": "ID du Compte Utilisateur :",
         "no_history_msg": "Aucun historique de scan enregistré pour ce compte. Effectuez un scan dans le Centre de Diagnostic !",
-        "phone_sent_msg": "OTP envoyé au {phone}. (Entrez le code '1234')",
-        "phone_success_msg": "Connexion par téléphone réussie !",
-        "phone_error_msg": "OTP invalide. Entrez '1234'.",
         "col_time": "Horodatage",
         "col_hub": "Région du Hub",
         "col_crop": "Culture",
@@ -1042,7 +692,6 @@ TRANSLATIONS = {
         "forum_title": "💬 Forum Communautaire Agricole Régional",
         "forum_subtitle": "Connectez-vous et collaborez avec les agriculteurs voisins à",
         "broadcast_header": "✍️ Diffuser aux Agriculteurs Locaux",
-        "author_label": "Votre Nom / Nom de la Ferme :",
         "tag_label": "Étiquette de Sujet :",
         "msg_label": "Partagez une mise à jour, posez une question ou alertez...",
         "forum_media_label": "Ajouter une image ou une vidéo (facultatif)",
@@ -1203,10 +852,10 @@ for _lang, _msgs in EPI_TEXT.items():
         TRANSLATIONS[_lang].update(_msgs)
 
 # --- INTEGRITY MODULE INITIALIZATION ---
-import data_integrity as di
 for _lang, _msgs in di.INTEGRITY_TEXT.items():
     if _lang in TRANSLATIONS:
         TRANSLATIONS[_lang].update(_msgs)
+_require_verified_oauth_email()
 di.init_registry()
 
 GPS_AUTO_ON_LOAD = True
@@ -1214,8 +863,10 @@ GPS_FALLBACK_HUB = "Global / Universal Zone"
 GPS_MAX_HUB_KM = 1000
 
 # --- B2G EPIDEMIOLOGICAL & FARMER HISTORY DATABASE ---
+@serialized_database_write
 def init_epidemiological_db():
-    conn = sqlite3.connect('cropguard_surveillance.db', check_same_thread=False)
+    _require_verified_oauth_email()
+    conn = connect_database(EPI_DB_PATH)
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -1333,23 +984,6 @@ def init_epidemiological_db():
         ''', sample_posts)
         conn.commit()
 
-    cursor.execute(
-        """
-        UPDATE farmer_community_posts
-        SET author_name = ?
-        WHERE author_name = ?
-          AND category_tag = ?
-          AND message = ?
-        """,
-        (
-            "CropGuard Field Team",
-            "Dr. Morara",
-            "🌾 Crop Advice",
-            "Applying copper-based fungicides early morning helps reduce spore germination during high humidity weeks.",
-        ),
-    )
-    conn.commit()
-        
     conn.close()
 
 # ==============================================================
@@ -1436,10 +1070,10 @@ _EPI_SCAN_COLUMNS = {
 }
 
 def _epi_conn(autocommit=False):
-    conn = sqlite3.connect(EPI_DB_PATH, timeout=15, check_same_thread=False,
-                           isolation_level=None if autocommit else "")
-    conn.execute("PRAGMA busy_timeout = 15000")
-    return conn
+    return connect_database(
+        EPI_DB_PATH,
+        isolation_level=None if autocommit else "",
+    )
 
 def _epi_norm(label):
     return re.sub(r"[\s_]+", " ", str(label or "").strip().lower())
@@ -1471,10 +1105,11 @@ def _epi_apply_label_rule(conn, only_unset=True):
         (*known, EPI_MIN_CONFIDENCE),
     )
 
+@serialized_database_write
 def ensure_epi_schema():
+    _require_verified_oauth_email()
     conn = _epi_conn()
     try:
-        conn.execute("PRAGMA journal_mode = WAL")
         have = {r[1] for r in conn.execute("PRAGMA table_info(scan_telemetry)")}
         for col, ddl in _EPI_SCAN_COLUMNS.items():
             if col not in have:
@@ -1511,12 +1146,7 @@ def ensure_epi_schema():
         conn.close()
 
 def epi_reporter_key():
-    authed = bool(st.user.get("is_logged_in", False))
-    if authed or st.session_state.get("auth_method") == "Phone OTP":
-        return f"u{st.session_state.get('logged_in_user_id', 1)}"
-    if "epi_anon_id" not in st.session_state:
-        st.session_state["epi_anon_id"] = uuid.uuid4().hex[:12]
-    return f"a{st.session_state['epi_anon_id']}"
+    return f"u{_require_authenticated_user_id()}"
 
 def epi_scan_location(hub_label):
     gs = st.session_state.get("gps_status") or {}
@@ -1530,17 +1160,10 @@ def epi_scan_location(hub_label):
             pass
     return {"lat": None, "lon": None, "loc_source": "manual"}
 
-def _epi_clear_caches():
-    get_active_regional_alerts.clear()
-    get_government_epidemiological_summary.clear()
-    epi_registry_stats.clear()
-    epi_map_points.clear()
-    epi_crop_options.clear()
-    epi_quality_counts.clear()
-    epi_recent_rows.clear()
-
+@serialized_database_write
 def log_scan_telemetry(hub_region, target_crop, disease_name, confidence, severity_stage, severity_pct,
                        lat=None, lon=None, loc_source="manual"):
+    user_id = _require_authenticated_user_id()
     label_ok = epi_label_ok(disease_name, confidence)
     conn = None
     try:
@@ -1551,7 +1174,7 @@ def log_scan_telemetry(hub_region, target_crop, disease_name, confidence, severi
                 severity_stage, severity_percentage, lat, lon, latitude, longitude, diagnosis_status,
                 disease_key, loc_source, reporter_key, crop_canon, label_ok, is_demo, model_tag)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
-            (st.session_state.get("logged_in_user_id", 1), datetime.now().strftime(EPI_TS_FMT),
+            (user_id, datetime.now().strftime(EPI_TS_FMT),
              hub_region, target_crop, disease_name, confidence, severity_stage, severity_pct,
              lat, lon, lat, lon, "LIKELY" if label_ok else "POSSIBLE",
              find_disease_guide_key(target_crop, disease_name), loc_source, epi_reporter_key(),
@@ -1564,7 +1187,6 @@ def log_scan_telemetry(hub_region, target_crop, disease_name, confidence, severi
     finally:
         if conn is not None:
             conn.close()
-    _epi_clear_caches()
     if label_ok:
         try:
             evaluate_outbreak_cluster(hub_region, disease_name)
@@ -1572,7 +1194,9 @@ def log_scan_telemetry(hub_region, target_crop, disease_name, confidence, severi
             print(f"Outbreak evaluation error: {e}")
     return True
 
+@serialized_database_write
 def evaluate_outbreak_cluster(hub_region, disease_name, now=None):
+    _require_verified_oauth_email()
     if hub_region == GPS_FALLBACK_HUB or _epi_norm(disease_name) == "healthy":
         return False
     now = now or datetime.now()
@@ -1888,8 +1512,11 @@ def _epi_bootstrap():
 
 _epi_bootstrap()
 
+@serialized_database_write
 def sync_google_user_profile(email, display_name):
-    conn = sqlite3.connect("cropguard_surveillance.db", check_same_thread=False)
+    if email != _require_verified_oauth_email():
+        raise PermissionError("Cannot update a profile for a different OAuth identity.")
+    conn = _epi_conn()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT user_id FROM users WHERE identifier = ?", (email,))
@@ -2439,6 +2066,40 @@ def render_disease_guide(guide_key, crop_name, language, severity_stage, hub_lab
             st.caption(advisory["chemical_notice"])
         else:
             st.warning(advisory["chemical_notice"])
+    if advisory.get("has_chemical_advice") is True:
+        render_ppe_safety_warning(language)
+
+
+def render_ppe_safety_warning(language="English"):
+    labels = {
+        "English": {
+            "title": "⚠️ CRITICAL AGROCHEMICAL SAFETY",
+            "body": "Agricultural chemical misuse is a severe health risk. If applying treatments, you MUST use:",
+            "ppe": ["N95 Respirator Mask", "Chemical-Resistant Gloves", "Long Sleeves & Rubber Boots"],
+            "rule": "Do not enter the sprayed field for at least 24 hours (or as dictated by the product label).",
+        },
+        "Kiswahili": {
+            "title": "⚠️ USALAMA MUHIMU WA KEMIKALI ZA KILIMO",
+            "body": "Matumizi mabaya ya kemikali za kilimo ni hatari kwa afya. Ikiwa unatumia matibabu, LAZIMA utumie:",
+            "ppe": ["Barakoa ya N95", "Glavu Zinazostahimili Kemikali", "Nguo za Mikono Mirefu na Buti za Mpira"],
+            "rule": "Usiingie kwenye shamba lililopuliziwa dawa kwa angalau saa 24 (au kulingana na lebo ya bidhaa).",
+        },
+        "French": {
+            "title": "⚠️ SÉCURITÉ AGROCHIMIQUE CRITIQUE",
+            "body": "La mauvaise utilisation des produits chimiques agricoles est un risque grave pour la santé. Lors des traitements, vous DEVEZ utiliser :",
+            "ppe": ["Masque respiratoire N95", "Gants résistants aux produits chimiques", "Manches longues et bottes en caoutchouc"],
+            "rule": "N'entrez pas dans le champ traité pendant au moins 24 heures (ou selon l'étiquette du produit).",
+        },
+    }
+    lang_data = labels.get(language, labels["English"])
+
+    st.error(lang_data["title"], icon="🚨")
+    with st.container(border=True):
+        st.write(lang_data["body"])
+        cols = st.columns(3)
+        for idx, item in enumerate(lang_data["ppe"]):
+            cols[idx].markdown(f"✅ **{item}**")
+        st.caption(f"🛑 **{lang_data['rule']}**")
 
 
 def render_missing_kb_advisory(
@@ -2595,6 +2256,18 @@ def render_missing_kb_advisory(
         st.caption(labels["verify"])
     else:
         st.write(labels["no_support"])
+
+    advisory = dict(advisory)
+    advisory["has_chemical_advice"] = (
+        advisory.get("has_chemical_advice") is True
+        or bool(
+            reference_advisory
+            and reference_advisory.get("has_chemical_advice") is True
+        )
+    )
+    if advisory.get("has_chemical_advice") is True:
+        render_ppe_safety_warning(language)
+
 
 def render_advisory_technical_analysis(advisory, language):
     if not advisory:
@@ -4697,6 +4370,50 @@ def view_map(ctx: types.SimpleNamespace) -> None:
     outbreak_map()
 
 
+def render_fair_market_board(hub_label):
+    st.markdown("### ⚖️ Kisii Fair Price Index")
+    st.info(
+        "Static Kisii demo reference prices—not live or independently verified. "
+        f"Selected hub: {hub_label}. Confirm current local prices before transacting."
+    )
+
+    market_data = {
+        "Commodity / Input": [
+            "Maize (90kg Bag)",
+            "Irish Potatoes (50kg)",
+            "DAP Fertilizer (50kg)",
+            "Certified Maize Seed (2kg)",
+        ],
+        "Demo Reference Price (KES)": [
+            "3,200 - 3,500",
+            "2,800 - 3,100",
+            "4,500 - 4,800",
+            "500 - 650",
+        ],
+        "Broker Alert Level": [
+            "🔴 High Risk",
+            "🟡 Moderate Risk",
+            "🟢 Stable",
+            "🟢 Subsidized",
+        ],
+        "Trend": ["📈 Rising", "📉 Falling", "➖ Stable", "➖ Stable"],
+    }
+    df_market = pd.DataFrame(market_data)
+
+    st.dataframe(
+        df_market,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Broker Alert Level": st.column_config.TextColumn(
+                "Broker Alert Level",
+                help="Based on recent farmer reports of price manipulation.",
+            )
+        },
+    )
+    st.caption("Report predatory pricing to the Ministry Hotline via the Community Feed.")
+
+
 # ==========================================
 # VIEW 1.5: FARMER ACCOUNT & HISTORY PORTAL
 # ==========================================
@@ -4722,14 +4439,14 @@ if app_mode == T["nav_acc"]:
             st.markdown(f"### {T['history_header']} ({st.session_state.get('user_display_name', 'Farmer')})")
             st.info(T["history_info"])
             
-            conn = sqlite3.connect('cropguard_surveillance.db', check_same_thread=False)
+            conn = connect_database('cropguard_surveillance.db')
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT timestamp, hub_region, target_crop, detected_disease, confidence_score, severity_stage, severity_percentage 
                 FROM scan_telemetry 
                 WHERE user_id = ? 
                 ORDER BY scan_id DESC
-            ''', (st.session_state.get('logged_in_user_id', 1),))
+            ''', (_require_authenticated_user_id(),))
             history_rows = cursor.fetchall()
             conn.close()
 
@@ -4783,15 +4500,6 @@ elif app_mode == T["nav_ai"]:
                     hub=selected_hub_label
                 )}
             ]
-        elif (
-            st.session_state.messages
-            and st.session_state.messages[0].get("role") == "assistant"
-            and "Dr. Morara" in st.session_state.messages[0].get("content", "")
-        ):
-            st.session_state.messages[0]["content"] = (
-                st.session_state.messages[0]["content"].replace("Dr. Morara", "Farmer")
-            )
-
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
@@ -4847,7 +4555,6 @@ elif app_mode == T["nav_forum"]:
     with col_post:
         with st.container(border=True):
             st.markdown(f"### {T['broadcast_header']}")
-            author = st.text_input(T["author_label"], value=st.session_state.get('user_display_name', 'Farmer'))
             tag = st.selectbox(T["tag_label"], ["🚨 Outbreak Alert", "🌾 Crop Advice", "🚜 Equipment & Inputs", "🛒 Marketplace / Trade"])
             message_text = st.text_area(T["msg_label"], height=120)
             forum_media = st.file_uploader(
@@ -4859,16 +4566,20 @@ elif app_mode == T["nav_forum"]:
             )
             
             if st.button(T["share_btn"], type="primary", use_container_width=True):
-                media_bytes = forum_media.getvalue() if forum_media is not None else None
+                _require_authenticated_user_id()
                 media_extension = (
                     os.path.splitext(forum_media.name)[1].lower()
                     if forum_media is not None else ""
                 )
                 media_is_video = media_extension in {".mp4", ".mov", ".webm"}
                 media_limit = 50 * 1024 * 1024 if media_is_video else 15 * 1024 * 1024
-                if forum_media is not None and len(media_bytes) > media_limit:
+                if forum_media is not None and forum_media.size > media_limit:
                     st.error(T["forum_media_too_large"])
                 elif message_text.strip() or forum_media is not None:
+                    media_bytes = forum_media.getvalue() if forum_media is not None else None
+                    if media_bytes is not None and len(media_bytes) > media_limit:
+                        st.error(T["forum_media_too_large"])
+                        st.stop()
                     media_type = None
                     if forum_media is not None:
                         if media_is_video:
@@ -4881,35 +4592,46 @@ elif app_mode == T["nav_forum"]:
                                 st.error(T["forum_media_invalid"])
                                 st.stop()
                             media_type = "image"
-                    conn = sqlite3.connect('cropguard_surveillance.db', check_same_thread=False)
-                    cursor = conn.cursor()
-                    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    cursor.execute('''
-                        INSERT INTO farmer_community_posts
-                            (timestamp, hub_region, author_name, category_tag, message,
-                             media_name, media_type, media_data)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        ts,
-                        selected_hub_label,
-                        author.strip() or st.session_state.get('user_display_name', 'Farmer'),
-                        tag,
-                        message_text.strip(),
-                        forum_media.name if forum_media is not None else None,
-                        media_type,
-                        sqlite3.Binary(media_bytes) if media_bytes is not None else None,
-                    ))
-                    conn.commit()
-                    conn.close()
+                    conn = _epi_conn()
+                    try:
+                        with database_write_lock():
+                            cursor = conn.cursor()
+                            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            cursor.execute('''
+                                INSERT INTO farmer_community_posts
+                                    (timestamp, hub_region, author_name, category_tag, message,
+                                     media_name, media_type, media_data)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                ts,
+                                selected_hub_label,
+                                st.session_state.get('user_display_name'),
+                                tag,
+                                message_text.strip(),
+                                forum_media.name if forum_media is not None else None,
+                                media_type,
+                                sqlite3.Binary(media_bytes) if media_bytes is not None else None,
+                            ))
+                            conn.commit()
+                    finally:
+                        conn.close()
                     st.success(T["post_posted_msg"])
                     st.rerun()
                 else:
                     st.warning(T["forum_post_empty"])
 
     with col_feed:
+        with st.expander("📊 View Kisii Fair Market Prices", expanded=True):
+            render_fair_market_board(
+                st.session_state.get(
+                    "selected_hub_label",
+                    "Kisii, Kenya (Highland Zone)",
+                )
+            )
+
         st.markdown(f"### {T['feed_header']} ({selected_hub_label})")
         
-        conn = sqlite3.connect('cropguard_surveillance.db', check_same_thread=False)
+        conn = _epi_conn()
         cursor = conn.cursor()
         cursor.execute('''
             SELECT author_name, category_tag, message, timestamp,
@@ -5027,6 +4749,7 @@ else:
         uploaded_file = None
         image = None
         upload_bytes = None
+        upload_too_large = False
         assessment = None
         image_quality = {"blocked": True}
         sample_source_type = "🌱 Verified Farm Field Sample (Log to B2G Surveillance)"
@@ -5065,17 +4788,32 @@ else:
 
             st.session_state["selected_crop"] = selected_crop
             if uploaded_file is not None:
-                upload_bytes = uploaded_file.getvalue()
-                upload_digest = hashlib.sha256(upload_bytes).hexdigest()
-                if st.session_state.get("_last_upload_digest") != upload_digest:
-                    st.session_state["_last_upload_digest"] = upload_digest
+                max_upload_size = 15 * 1024 * 1024
+                upload_too_large = uploaded_file.size > max_upload_size
+                if not upload_too_large:
+                    upload_bytes = uploaded_file.getvalue()
+                    upload_too_large = len(upload_bytes) > max_upload_size
+                if upload_too_large:
+                    upload_bytes = None
                     clear_diagnostic_results()
+                else:
+                    upload_digest = hashlib.sha256(upload_bytes).hexdigest()
+                    if st.session_state.get("_last_upload_digest") != upload_digest:
+                        st.session_state["_last_upload_digest"] = upload_digest
+                        clear_diagnostic_results()
 
             with upload_col:
                 with st.container(border=True):
                     st.markdown(f"### {T['quality_integrity_header']}")
                     if uploaded_file is None:
                         st.caption(T["leaf_upload_help"])
+                    elif upload_too_large:
+                        st.error(
+                            T.get(
+                                "leaf_upload_too_large",
+                                "Images must be 15 MB or smaller. Choose a smaller image.",
+                            )
+                        )
                     else:
                         try:
                             image = ImageOps.exif_transpose(Image.open(io.BytesIO(upload_bytes)))
@@ -5106,6 +4844,7 @@ else:
                         use_container_width=True,
                         disabled=(
                             uploaded_file is None
+                            or upload_too_large
                             or image is None
                             or image_quality["blocked"]
                         ),
@@ -5174,6 +4913,7 @@ else:
                         severity_stage=severity_stage,
                     )
                 else:
+                    st.markdown("### 🌱 Farmer-Friendly Summary")
                     st.subheader(raw_label)
                     st.write(f"**{T['crop_context_lbl']}** {chosen_crop}")
                     if st.session_state.get("last_diagnosis_notice"):
@@ -5272,18 +5012,7 @@ else:
                         language,
                     )
 
-            advanced_labels = {
-                "English": "🔬 View Advanced Technical & Model Breakdown",
-                "Kiswahili": "🔬 Tazama Uchambuzi wa Kina wa Kiufundi na Miundo",
-                "French": "🔬 Voir l’analyse technique et les modèles",
-            }
-            with st.expander(
-                advanced_labels.get(
-                    language,
-                    advanced_labels["English"],
-                ),
-                expanded=False,
-            ):
+            with st.expander("🔬 View Advanced Technical & Model Breakdown", expanded=False):
                 st.success(T["analysis_complete_msg"])
                 di.render_log_outcome(st, T, st.session_state.get("last_log_outcome"))
                 if st.session_state.get("last_analysis_error"):
@@ -5347,7 +5076,7 @@ else:
             position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
             z-index: -999;
-            background-color: #1E4620;
+            background: linear-gradient(135deg, #0d1f14 0%, #10251a 48%, #121212 100%);
         }
         
         .bg-slide {
@@ -5796,7 +5525,11 @@ else:
                 log_outcome = {"status": "BLOCKED", "blockers": decision["blockers"]}
                 if decision["allow"]:
                     fingerprint = assessment["fingerprint"]
-                    if not di.claim_field_image(fingerprint, st.session_state.get('logged_in_user_id', 1), selected_hub_label):
+                    if not di.claim_field_image(
+                        fingerprint,
+                        _require_authenticated_user_id(),
+                        selected_hub_label,
+                    ):
                         log_outcome["blockers"] = [{"code": "DUPLICATE", "params": {}}]
                     elif log_scan_telemetry(
                         hub_region=selected_hub_label,
