@@ -37,6 +37,229 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def _google_oidc_is_configured():
+    try:
+        auth_config = st.secrets["auth"]
+        google_config = auth_config["google"]
+        return all((
+            auth_config["redirect_uri"],
+            auth_config["cookie_secret"],
+            google_config["client_id"],
+            google_config["client_secret"],
+            google_config["server_metadata_url"],
+        ))
+    except (AttributeError, FileNotFoundError, KeyError, TypeError):
+        return False
+
+
+google_user = st.user
+if not google_user.get("is_logged_in", False):
+    st.markdown(
+        """
+        <style>
+        .stApp,
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMain"] {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0d1f14 0%, #10251a 48%, #121212 100%) !important;
+        }
+        [data-testid="stSidebar"],
+        [data-testid="stHeader"] {
+            display: none !important;
+        }
+        [data-testid="stMainBlockContainer"] {
+            max-width: 1040px;
+            min-height: 100vh;
+            padding: 5vh 1.5rem 4vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .st-key-cg-login-card {
+            max-width: 760px;
+            width: 100%;
+            margin: 0 auto;
+            padding: clamp(1.5rem, 4vw, 3rem);
+            background: linear-gradient(145deg, rgba(24, 46, 33, .82), rgba(17, 25, 20, .88));
+            border: 1px solid rgba(190, 225, 196, .24);
+            border-radius: 24px;
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            box-shadow: 0 28px 80px rgba(0, 0, 0, .48), inset 0 1px 0 rgba(255, 255, 255, .08);
+            text-align: center;
+        }
+        .st-key-cg-login-card h1 {
+            color: #f4fff5 !important;
+            font-size: clamp(2.1rem, 5vw, 3.25rem);
+            letter-spacing: -.045em;
+            margin: 0 0 .5rem;
+            text-shadow: none !important;
+        }
+        .st-key-cg-login-card p,
+        .st-key-cg-login-card span {
+            color: #d4e5d7 !important;
+            text-shadow: none !important;
+        }
+        .cg-login-subtitle {
+            margin: 0 auto 1.8rem;
+            font-size: clamp(1rem, 2vw, 1.2rem);
+            color: #b7d4bd !important;
+            line-height: 1.6;
+        }
+        .cg-login-features {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .8rem;
+            margin: 1.5rem 0 1.75rem;
+            text-align: left;
+        }
+        .cg-login-feature {
+            min-height: 112px;
+            padding: 1rem;
+            border: 1px solid rgba(190, 225, 196, .16);
+            border-radius: 14px;
+            background: rgba(5, 18, 11, .42);
+        }
+        .cg-login-feature strong {
+            display: block;
+            margin-bottom: .4rem;
+            color: #e4f6e7;
+            font-size: .96rem;
+        }
+        .cg-login-feature span {
+            display: block;
+            color: #b9cdbd;
+            font-size: .84rem;
+            line-height: 1.45;
+        }
+        .st-key-cg-google-login button {
+            width: 100%;
+            min-height: 3.15rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: .7rem;
+            background: #fff !important;
+            color: #303134 !important;
+            border: 1px solid #dadce0 !important;
+            border-radius: 8px !important;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, .18) !important;
+            font-size: 1rem !important;
+            font-weight: 600 !important;
+            text-shadow: none !important;
+            transition: box-shadow .18s ease, background-color .18s ease, transform .18s ease;
+        }
+        .st-key-cg-google-login button::before {
+            content: "";
+            width: 22px;
+            height: 22px;
+            flex: 0 0 22px;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: contain;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23EA4335' d='M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z'/%3E%3Cpath fill='%234285F4' d='M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.76 7.18l7.73 6C44.42 37.96 46.98 31.86 46.98 24.55z'/%3E%3Cpath fill='%23FBBC05' d='M10.53 28.59A14.4 14.4 0 0 1 9.75 24c0-1.59.27-3.13.76-4.59l-7.98-6.19A23.9 23.9 0 0 0 0 24c0 3.87.93 7.54 2.56 10.78l7.97-6.19z'/%3E%3Cpath fill='%2334A853' d='M24 48c6.48 0 11.93-2.13 15.91-5.8l-7.73-6c-2.15 1.45-4.92 2.3-8.18 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z'/%3E%3C/svg%3E");
+        }
+        .st-key-cg-google-login button:hover {
+            background: #f8faff !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, .28) !important;
+            transform: translateY(-1px);
+        }
+        .st-key-cg-google-login button p {
+            color: #303134 !important;
+            text-shadow: none !important;
+        }
+        .st-key-cg-login-card [data-testid="stAlert"] {
+            text-align: left;
+        }
+        .cg-login-footer {
+            max-width: 590px;
+            margin: 1.5rem auto 0;
+            color: #a9c0ae !important;
+            font-size: .82rem;
+            line-height: 1.55;
+        }
+        @media (max-width: 680px) {
+            [data-testid="stMainBlockContainer"] {
+                padding: 1rem .75rem;
+            }
+            .st-key-cg-login-card {
+                padding: 1.5rem 1.1rem;
+                border-radius: 18px;
+            }
+            .cg-login-features {
+                grid-template-columns: 1fr;
+            }
+            .cg-login-feature {
+                min-height: auto;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .st-key-cg-google-login button { transition: none; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key="cg-login-card"):
+        st.markdown("# 🌱 CropGuard AI")
+        st.markdown(
+            '<p class="cg-login-subtitle">Climate-Smart Crop Pathology &amp; '
+            'Extension Assistant</p>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            """
+            <div class="cg-login-features">
+              <div class="cg-login-feature">
+                <strong>⚡ Instant Diagnostics</strong>
+                <span>AI-driven disease identification</span>
+              </div>
+              <div class="cg-login-feature">
+                <strong>👨‍🌾 Farmer-First</strong>
+                <span>Clear, jargon-free management plans</span>
+              </div>
+              <div class="cg-login-feature">
+                <strong>🏪 Agro-Vet Network</strong>
+                <span>Connect directly to local support &amp; cures</span>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<p class="cg-login-subtitle" style="font-size:.95rem;margin-bottom:1rem">'
+            "Sign in securely with Google to continue</p>",
+            unsafe_allow_html=True,
+        )
+        if _google_oidc_is_configured():
+            with st.container(key="cg-google-login"):
+                if st.button(
+                    "Continue with Google",
+                    key="google_oidc_login",
+                    use_container_width=True,
+                ):
+                    st.login("google")
+        else:
+            st.error(
+                "Google sign-in is not configured. Add the OAuth settings to "
+                "`.streamlit/secrets.toml` and register this app's redirect URI in Google Cloud."
+            )
+        st.markdown(
+            '<p class="cg-login-footer">CropGuard AI • Protecting crops, securing yields, '
+            'and scaling climate-smart food systems for farmers everywhere.</p>',
+            unsafe_allow_html=True,
+        )
+    st.stop()
+
+google_email = str(google_user.get("email", "")).strip()
+if not google_email:
+    st.error("Google sign-in did not provide an email address. Contact the administrator.")
+    st.stop()
+google_name = str(google_user.get("name") or google_email).strip()
+st.session_state["user_email"] = google_email
+st.session_state["user_display_name"] = google_name
+st.session_state["auth_method"] = "Google OIDC"
+
 # ==============================================================
 # --- EMBEDDED DATA INTEGRITY MODULE (di) ---
 # ==============================================================
@@ -1075,7 +1298,7 @@ def init_epidemiological_db():
         cursor.execute('''
             INSERT INTO users (account_type, identifier, display_name, created_at)
             VALUES (?, ?, ?, ?)
-        ''', ('Google', 'morara.emmanuel@cropguard.ai', 'Dr. Morara', datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        ''', ('Guest', 'guest@cropguard.invalid', 'Farmer', datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
 
     cursor.execute("SELECT COUNT(*) FROM scan_telemetry")
@@ -1101,7 +1324,7 @@ def init_epidemiological_db():
     if cursor.fetchone()[0] == 0:
         sample_posts = [
             ("2026-10-11 09:00", "Kisii, Kenya (Highland Zone)", "Mzee Juma", "🚨 Outbreak Alert", "Noticed early Fall Armyworm activity on maize stalks near Kenyenya. Inspect fields before evening rains!"),
-            ("2026-10-11 11:30", "Kisii, Kenya (Highland Zone)", "Dr. Morara", "🌾 Crop Advice", "Applying copper-based fungicides early morning helps reduce spore germination during high humidity weeks."),
+            ("2026-10-11 11:30", "Kisii, Kenya (Highland Zone)", "CropGuard Field Team", "🌾 Crop Advice", "Applying copper-based fungicides early morning helps reduce spore germination during high humidity weeks."),
             ("2026-10-11 14:15", "Kumasi, Ghana (Cocoa & Grain Belt)", "Kwame Mensah", "🛒 Marketplace / Trade", "Looking for bulk organic nematicides delivered near Kumasi central hub. Reach out if available.")
         ]
         cursor.executemany('''
@@ -1109,6 +1332,23 @@ def init_epidemiological_db():
             VALUES (?, ?, ?, ?, ?)
         ''', sample_posts)
         conn.commit()
+
+    cursor.execute(
+        """
+        UPDATE farmer_community_posts
+        SET author_name = ?
+        WHERE author_name = ?
+          AND category_tag = ?
+          AND message = ?
+        """,
+        (
+            "CropGuard Field Team",
+            "Dr. Morara",
+            "🌾 Crop Advice",
+            "Applying copper-based fungicides early morning helps reduce spore germination during high humidity weeks.",
+        ),
+    )
+    conn.commit()
         
     conn.close()
 
@@ -1648,11 +1888,38 @@ def _epi_bootstrap():
 
 _epi_bootstrap()
 
-if 'logged_in_user_id' not in st.session_state:
-    st.session_state['logged_in_user_id'] = 1
-    st.session_state['user_identifier'] = 'morara.emmanuel@cropguard.ai'
-    st.session_state['user_display_name'] = 'Dr. Morara'
-    st.session_state['auth_method'] = 'Google'
+def sync_google_user_profile(email, display_name):
+    conn = sqlite3.connect("cropguard_surveillance.db", check_same_thread=False)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE identifier = ?", (email,))
+        user_row = cursor.fetchone()
+        if user_row:
+            user_id = user_row[0]
+            cursor.execute(
+                "UPDATE users SET display_name = ? WHERE user_id = ?",
+                (display_name, user_id),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO users (account_type, identifier, display_name, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("Google", email, display_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            user_id = cursor.lastrowid
+        conn.commit()
+        return user_id
+    finally:
+        conn.close()
+
+
+st.session_state["logged_in_user_id"] = sync_google_user_profile(
+    google_email,
+    google_name,
+)
+st.session_state["user_identifier"] = google_email
 
 if 'selected_hub_label' not in st.session_state:
     st.session_state['selected_hub_label'] = "Kisii, Kenya (Highland Zone)"
@@ -3345,6 +3612,11 @@ st.sidebar.markdown("""
     <span class="cg-brand-seed cg-brand-seed-two" aria-hidden="true">✧</span>
 </div>
 """, unsafe_allow_html=True)
+st.sidebar.caption(
+    f"{st.session_state['user_display_name']}\n{st.session_state['user_email']}"
+)
+if st.sidebar.button("Log out", key="google_oidc_logout", use_container_width=True):
+    st.logout()
 st.sidebar.markdown("---")
 
 # 2. Primary Navigation
@@ -4438,80 +4710,16 @@ if app_mode == T["nav_acc"]:
     with col_acc1:
         with st.container(border=True):
             st.markdown(f"### {T['profile_header']}")
-            
-            if not st.user.get("is_logged_in", False):
-                st.info(T["login_prompt"])
-                if st.button(T["login_btn"], type="primary", use_container_width=True):
-                    st.login("google")
-            else:
-                google_email = st.user.email
-                google_name = st.user.name if hasattr(st.user, 'name') and st.user.name else google_email
-                
-                conn = sqlite3.connect('cropguard_surveillance.db', check_same_thread=False)
-                cursor = conn.cursor()
-                cursor.execute("SELECT user_id FROM users WHERE identifier = ?", (google_email,))
-                user_row = cursor.fetchone()
-                
-                if user_row:
-                    st.session_state['logged_in_user_id'] = user_row[0]
-                else:
-                    cursor.execute("INSERT INTO users (account_type, identifier, display_name, created_at) VALUES (?, ?, ?, ?)",
-                                   ('Google', google_email, google_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                    conn.commit()
-                    cursor.execute("SELECT last_insert_rowid()")
-                    st.session_state['logged_in_user_id'] = cursor.fetchone()[0]
-                conn.close()
-
-                st.session_state['user_display_name'] = google_name
-                st.session_state['user_identifier'] = google_email
-                st.session_state['auth_method'] = 'Google OIDC'
-
-                st.success(f"{T['auth_success']} {google_name}!")
-                st.write(f"**{T['email_lbl']}** `{google_email}`")
-                st.write(f"**{T['user_id_lbl']}** `F{st.session_state.get('logged_in_user_id', 1):05d}`")
-                
-                st.markdown("---")
-                if st.button(T["logout_btn"], use_container_width=True):
-                    st.logout()
-
-            st.markdown("---")
-            with st.expander(T["alt_phone_expander"]):
-                phone_num = st.text_input(T["phone_label"], value="")
-                if st.button(T["otp_btn"], use_container_width=True):
-                    if phone_num.strip():
-                        st.success(T["phone_sent_msg"].format(phone=phone_num))
-                
-                otp_code = st.text_input(T["otp_input"], type="password")
-                if st.button(T["verify_otp_btn"], use_container_width=True):
-                    if otp_code == "1234" and phone_num.strip():
-                        conn = sqlite3.connect('cropguard_surveillance.db', check_same_thread=False)
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT user_id, display_name FROM users WHERE identifier = ?", (phone_num,))
-                        user_row = cursor.fetchone()
-                        
-                        if user_row:
-                            st.session_state['logged_in_user_id'] = user_row[0]
-                            st.session_state['user_display_name'] = user_row[1]
-                            st.session_state['user_identifier'] = phone_num
-                            st.session_state['auth_method'] = 'Phone OTP'
-                        else:
-                            cursor.execute("INSERT INTO users (account_type, identifier, display_name, created_at) VALUES (?, ?, ?, ?)",
-                                           ('Phone', phone_num, 'Farmer ' + phone_num[-4:], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                            conn.commit()
-                            cursor.execute("SELECT last_insert_rowid()")
-                            st.session_state['logged_in_user_id'] = cursor.fetchone()[0]
-                            st.session_state['user_display_name'] = 'Farmer ' + phone_num[-4:]
-                            st.session_state['user_identifier'] = phone_num
-                            st.session_state['auth_method'] = 'Phone OTP'
-                        conn.close()
-                        st.success(T["phone_success_msg"])
-                        st.rerun()
-                    else:
-                        st.warning(T["phone_error_msg"])
+            st.success(f"{T['auth_success']} {st.session_state['user_display_name']}!")
+            st.write(f"**{T['email_lbl']}** `{st.session_state['user_email']}`")
+            st.write(
+                f"**{T['user_id_lbl']}** "
+                f"`F{st.session_state['logged_in_user_id']:05d}`"
+            )
 
     with col_acc2:
         with st.container(border=True):
-            st.markdown(f"### {T['history_header']} ({st.session_state.get('user_display_name', 'Dr. Morara')})")
+            st.markdown(f"### {T['history_header']} ({st.session_state.get('user_display_name', 'Farmer')})")
             st.info(T["history_info"])
             
             conn = sqlite3.connect('cropguard_surveillance.db', check_same_thread=False)
@@ -4571,10 +4779,18 @@ elif app_mode == T["nav_ai"]:
         if "messages" not in st.session_state:
             st.session_state.messages = [
                 {"role": "assistant", "content": T["chat_welcome"].format(
-                    user=st.session_state.get('user_display_name', 'Dr. Morara'),
+                    user=st.session_state.get('user_display_name', 'Farmer'),
                     hub=selected_hub_label
                 )}
             ]
+        elif (
+            st.session_state.messages
+            and st.session_state.messages[0].get("role") == "assistant"
+            and "Dr. Morara" in st.session_state.messages[0].get("content", "")
+        ):
+            st.session_state.messages[0]["content"] = (
+                st.session_state.messages[0]["content"].replace("Dr. Morara", "Farmer")
+            )
 
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
@@ -4631,7 +4847,7 @@ elif app_mode == T["nav_forum"]:
     with col_post:
         with st.container(border=True):
             st.markdown(f"### {T['broadcast_header']}")
-            author = st.text_input(T["author_label"], value=st.session_state.get('user_display_name', 'Dr. Morara'))
+            author = st.text_input(T["author_label"], value=st.session_state.get('user_display_name', 'Farmer'))
             tag = st.selectbox(T["tag_label"], ["🚨 Outbreak Alert", "🌾 Crop Advice", "🚜 Equipment & Inputs", "🛒 Marketplace / Trade"])
             message_text = st.text_area(T["msg_label"], height=120)
             forum_media = st.file_uploader(
