@@ -3097,9 +3097,20 @@ section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
 section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
 section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3,
 section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h4,
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] *,
 section[data-testid="stSidebar"] label,
 section[data-testid="stSidebar"] label p {
     color: #203a2b !important;
+    -webkit-text-fill-color: #203a2b !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+}
+section[data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stCaptionContainer"],
+section[data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stCaptionContainer"] * {
+    color: #203a2b !important;
+    -webkit-text-fill-color: #203a2b !important;
+    opacity: 1 !important;
     text-shadow: none !important;
 }
 section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3 {
@@ -4667,6 +4678,254 @@ def render_fair_market_board():
     )
 
 
+def render_financial_impact_estimator(crop_name):
+    st.markdown("### 💰 Farm Revenue-at-Risk Estimator")
+    st.caption(
+        "Uses a dated KAMIS market price and the farm figures you provide. "
+        "It does not infer yield loss from leaf discoloration or assume a treatment will work."
+    )
+
+    crop_key = re.sub(r"[^a-z0-9]+", "_", str(crop_name).casefold()).strip("_") or "crop"
+    try:
+        products, _, _ = _fetch_kamis_market_page(per_page=10)
+    except (requests.RequestException, RuntimeError) as error:
+        st.error(f"Could not load official prices for the estimator: {error}")
+        st.markdown(f"[Open the official KAMIS market listings]({KAMIS_MARKET_URL})")
+        return
+
+    crop_text = str(crop_name).casefold()
+    product_match_terms = []
+    if "maize" in crop_text:
+        product_match_terms = ["dry maize"]
+    elif "potato" in crop_text:
+        product_match_terms = ["red irish potato"]
+    elif "tomato" in crop_text:
+        product_match_terms = ["tomatoes"]
+    elif "bean" in crop_text:
+        product_match_terms = ["beans"]
+    elif "rice" in crop_text:
+        product_match_terms = ["rice"]
+    elif "wheat" in crop_text:
+        product_match_terms = ["wheat"]
+
+    matching_product_index = next(
+        (
+            index for index, (_, label) in enumerate(products)
+            if any(term in label.casefold() for term in product_match_terms)
+        ),
+        None,
+    )
+    product_col, refresh_col = st.columns([3, 1], vertical_alignment="bottom")
+    with product_col:
+        selected_product = st.selectbox(
+            "KAMIS commodity for this crop",
+            options=products,
+            index=matching_product_index,
+            format_func=lambda product: product[1],
+            key=f"financial_market_product_{crop_key}",
+            help="Choose the closest matching commodity recorded by KAMIS.",
+            placeholder="Choose a matching KAMIS commodity",
+        )
+    with refresh_col:
+        if selected_product and st.button(
+            "Refresh price",
+            key=f"financial_market_refresh_{crop_key}",
+            use_container_width=True,
+        ):
+            _fetch_kamis_market_page.clear(selected_product[0], 3000)
+            st.rerun()
+
+    if selected_product is None:
+        st.info("Select the matching KAMIS commodity to continue the estimate.")
+        return
+
+    try:
+        _, records, fetched_at = _fetch_kamis_market_page(
+            selected_product[0],
+            3000,
+        )
+    except (requests.RequestException, RuntimeError) as error:
+        st.error(f"Could not load KAMIS prices for {selected_product[1]}: {error}")
+        return
+
+    required_columns = {"County", "Market", "Date", "Wholesale", "Retail"}
+    if not required_columns.issubset(records.columns):
+        st.error("KAMIS did not return the fields needed for this estimate.")
+        return
+
+    records["Date"] = pd.to_datetime(records["Date"], errors="coerce")
+    records["Wholesale"] = _parse_kamis_numeric_values(records["Wholesale"])
+    records["Retail"] = _parse_kamis_numeric_values(records["Retail"])
+    records = records.dropna(subset=["Date", "County", "Market"])
+    records = records[
+        records["County"].astype(str).str.strip().ne("")
+        & records["Market"].astype(str).str.strip().ne("")
+    ]
+    records = records.dropna(subset=["Wholesale", "Retail"], how="all")
+    if records.empty:
+        st.warning(
+            f"KAMIS has no dated price observations for {selected_product[1]}. "
+            "Choose another commodity or try again later."
+        )
+        return
+
+    market_keys = [
+        column for column in ("County", "Market", "Classification", "Grade")
+        if column in records.columns
+    ]
+    latest_prices = (
+        records.sort_values("Date", ascending=False)
+        .drop_duplicates(subset=market_keys, keep="first")
+        .copy()
+    )
+    latest_prices = latest_prices.sort_values(
+        ["County", "Market", "Date"],
+        ascending=[True, True, False],
+    )
+    market_options = [
+        (
+            row["County"],
+            row["Market"],
+            row["Date"],
+            row["Wholesale"],
+            row["Retail"],
+        )
+        for _, row in latest_prices.iterrows()
+    ]
+    selected_observation = st.selectbox(
+        "Latest reported market observation",
+        options=market_options,
+        format_func=lambda observation: (
+            f"{observation[0]} · {observation[1]} · "
+            f"{observation[2].strftime('%Y-%m-%d')}"
+        ),
+        key=f"financial_market_observation_{selected_product[0]}",
+    )
+    price_kind = st.radio(
+        "Use price type",
+        ["Retail", "Wholesale"],
+        horizontal=True,
+        key=f"financial_price_type_{selected_product[0]}",
+    )
+    unit_price = selected_observation[4 if price_kind == "Retail" else 3]
+    if pd.isna(unit_price):
+        st.warning(
+            f"KAMIS did not report a {price_kind.lower()} price for this market. "
+            "Choose another market observation or price type."
+        )
+        return
+
+    st.caption(
+        f"Selected KAMIS price: **KES {unit_price:,.2f}/kg** "
+        f"({price_kind.lower()}, {selected_observation[1]}, "
+        f"{selected_observation[0]}, reported "
+        f"{selected_observation[2].strftime('%Y-%m-%d')}; fetched "
+        f"{fetched_at.strftime('%Y-%m-%d %H:%M')})."
+    )
+    observation_age_days = (
+        datetime.now().date() - selected_observation[2].date()
+    ).days
+    if observation_age_days > 7:
+        st.warning(
+            f"This KAMIS price observation is {observation_age_days} days old. "
+            "Confirm a current local price before relying on the estimate."
+        )
+
+    area_col, yield_col = st.columns(2)
+    with area_col:
+        acreage = st.number_input(
+            "Farm area (acres)",
+            min_value=0.01,
+            max_value=100000.0,
+            value=1.0,
+            step=0.25,
+            key="financial_farm_area_acres",
+        )
+    with yield_col:
+        expected_yield_per_acre = st.number_input(
+            "Expected harvest without this issue (kg per acre)",
+            min_value=0.0,
+            max_value=1000000.0,
+            value=0.0,
+            step=50.0,
+            key=f"financial_expected_yield_kg_per_acre_{crop_key}",
+            help="Enter your expected harvest based on this crop and farm; zero means not entered yet.",
+        )
+
+    loss_col, cost_col = st.columns(2)
+    with loss_col:
+        expected_loss_pct = st.number_input(
+            "Your estimated yield loss if unmanaged (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.0,
+            step=1.0,
+            key=f"financial_expected_loss_pct_{crop_key}",
+            help="This is your own estimate, not the AI leaf-discoloration score.",
+        )
+    with cost_col:
+        treatment_cost = st.number_input(
+            "Treatment and application cost for this area (KES)",
+            min_value=0.0,
+            max_value=1000000000.0,
+            value=0.0,
+            step=100.0,
+            key=f"financial_treatment_cost_kes_{crop_key}",
+            help="Enter a local supplier quote and any application/labour costs; zero means not entered yet.",
+        )
+
+    if expected_yield_per_acre <= 0:
+        st.info(
+            "Enter your expected harvest to calculate the value at risk. Add your "
+            "current treatment/application quote to compare it with the estimate; "
+            "enter 0 if no treatment cost is expected."
+        )
+        return
+
+    expected_revenue = acreage * expected_yield_per_acre * float(unit_price)
+    value_at_risk = expected_revenue * (expected_loss_pct / 100)
+    net_exposure_difference = value_at_risk - treatment_cost
+
+    st.markdown("#### Estimate for your entered farm details")
+    result_cols = st.columns(3)
+    result_cols[0].metric(
+        "Expected crop revenue",
+        f"KES {expected_revenue:,.0f}",
+        help=(
+            "Area × expected harvest per acre × selected KAMIS price. "
+            "This is not a guaranteed sale value."
+        ),
+    )
+    result_cols[1].metric(
+        "Estimated value at risk",
+        f"KES {value_at_risk:,.0f}",
+        f"{expected_loss_pct:.1f}% entered loss estimate",
+        delta_color="inverse",
+    )
+    result_cols[2].metric(
+        "Entered treatment cost",
+        f"KES {treatment_cost:,.0f}",
+    )
+
+    difference_col, note_col = st.columns([1, 2])
+    difference_col.metric(
+        "Risk-cost difference",
+        f"KES {net_exposure_difference:,.0f}",
+        "risk estimate minus entered cost",
+        delta_color="off",
+    )
+    note_col.info(
+        "This is a planning comparison only, not predicted savings or a treatment "
+        "recommendation. It assumes no treatment efficacy and does not include "
+        "transport, fees, price changes, or other farm costs."
+    )
+    st.caption(
+        "Formula: expected revenue = acres × expected kg/acre × dated KAMIS price; "
+        "value at risk = expected revenue × your entered loss percentage. "
+        f"[KAMIS source]({KAMIS_MARKET_URL})"
+    )
+
+
 # ==========================================
 # VIEW 1.5: FARMER ACCOUNT & HISTORY PORTAL
 # ==========================================
@@ -5406,68 +5665,8 @@ else:
                             "No exact crop-compatible knowledge-base match was found for this model class.",
                         ))
 
-                baseline_acre_value = {
-                    "Maize": 60000,
-                    "Irish potato": 90000,
-                    "Tomato": 120000,
-                    "Beans": 45000,
-                    "Coffee": 150000,
-                }
-                crop_base = next(
-                    (
-                        value
-                        for crop_name, value in baseline_acre_value.items()
-                        if crop_name.casefold() in chosen_crop.casefold()
-                    ),
-                    50000,
-                )
-                estimated_yield_loss_pct = severity_pct * 0.45
-                projected_loss_kes = (estimated_yield_loss_pct / 100) * crop_base
-                treatment_cost_kes = 1200
-
                 st.markdown("---")
-                st.markdown("### 💰 Financial Impact Analysis (1 Acre Estimate)")
-                st.caption(
-                    "Hackathon-only estimate using mock Kisii crop values and "
-                    "leaf discoloration as a rough proxy—not a yield forecast, "
-                    "treatment recommendation, or guaranteed return."
-                )
-                if is_healthy_prediction:
-                    st.success(
-                        "Crop appears healthy. Projected 1-Acre Yield Value: "
-                        f"**KES {crop_base:,.0f}**"
-                    )
-                else:
-                    st.info(
-                        "Calculated using AI leaf severity as a proxy for "
-                        "whole-field outbreak stage if left untreated."
-                    )
-                    col_f1, col_f2, col_f3 = st.columns(3)
-                    col_f1.metric(
-                        "Value at Risk",
-                        f"KES {projected_loss_kes:,.0f}",
-                        f"-{estimated_yield_loss_pct:.1f}% Yield",
-                        delta_color="inverse",
-                    )
-                    col_f2.metric(
-                        "Illustrative Treatment Cost",
-                        f"KES {treatment_cost_kes:,.0f}",
-                    )
-
-                    net_savings = projected_loss_kes - treatment_cost_kes
-                    if net_savings > 0:
-                        col_f3.metric(
-                            "Potential Net Difference",
-                            f"KES {net_savings:,.0f}",
-                            "Illustrative only",
-                        )
-                    else:
-                        col_f3.metric(
-                            "Potential Net Difference",
-                            "N/A",
-                            "Estimated damage does not exceed mock cost",
-                            delta_color="off",
-                        )
+                render_financial_impact_estimator(chosen_crop)
 
             with st.container(border=True):
                 st.markdown(f"### {T['hub_support_header']} ({selected_hub_label})")
