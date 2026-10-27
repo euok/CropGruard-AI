@@ -98,24 +98,24 @@ if not google_user.get("is_logged_in", False):
         .cg-login-backdrop-slide:nth-child(1) {
             background-image:
                 linear-gradient(135deg, rgba(13, 31, 20, 0.88), rgba(10, 15, 12, 0.98)),
-                url("https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=2400&q=85");
+                url("https://images.unsplash.com/photo-1592982537447-7440770cbfc9?auto=format&fit=crop&w=2400&q=85");
         }
         .cg-login-backdrop-slide:nth-child(2) {
             background-image:
                 linear-gradient(135deg, rgba(13, 31, 20, 0.88), rgba(10, 15, 12, 0.98)),
-                url("https://images.unsplash.com/photo-1592982537447-7440770cbfc9?auto=format&fit=crop&w=2400&q=85");
+                url("https://images.unsplash.com/photo-1589923188900-85dae523342b?auto=format&fit=crop&w=2400&q=85");
             animation-delay: -15s;
         }
         .cg-login-backdrop-slide:nth-child(3) {
             background-image:
                 linear-gradient(135deg, rgba(13, 31, 20, 0.88), rgba(10, 15, 12, 0.98)),
-                url("https://images.unsplash.com/photo-1625246333195-78d9c38ad449?auto=format&fit=crop&w=2400&q=85");
+                url("https://images.unsplash.com/photo-1500937386664-56d1dfef3854?auto=format&fit=crop&w=2400&q=85");
             animation-delay: -10s;
         }
         .cg-login-backdrop-slide:nth-child(4) {
             background-image:
                 linear-gradient(135deg, rgba(13, 31, 20, 0.88), rgba(10, 15, 12, 0.98)),
-                url("https://images.unsplash.com/photo-1523348837708-15d4a09cfac2?auto=format&fit=crop&w=2400&q=85");
+                url("https://images.unsplash.com/photo-1605000797499-95a51c5269ae?auto=format&fit=crop&w=2400&q=85");
             animation-delay: -5s;
         }
         @keyframes cg-climate-slideshow {
@@ -124,6 +124,10 @@ if not google_user.get("is_logged_in", False):
             25% { opacity: 1; transform: scale(1.02); }
             30% { opacity: 0; transform: scale(1); }
             100% { opacity: 0; transform: scale(1); }
+        }
+        @keyframes cg-float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); box-shadow: 0 25px 45px rgba(118, 255, 3, 0.2); }
         }
         .st-key-cg-login-card {
             position: relative;
@@ -139,6 +143,17 @@ if not google_user.get("is_logged_in", False):
             -webkit-backdrop-filter: blur(18px);
             box-shadow: 0 28px 80px rgba(0, 0, 0, .48), inset 0 1px 0 rgba(255, 255, 255, .08);
             text-align: center;
+        }
+        .cg-coop-badge {
+            display: table;
+            margin: 0 auto .8rem;
+            padding: .35rem .75rem;
+            border: 1px solid rgba(118, 255, 3, 0.3);
+            border-radius: 999px;
+            background: rgba(118, 255, 3, 0.15);
+            color: #a5f28a;
+            font-size: 0.75rem;
+            font-weight: 700;
         }
         .st-key-cg-login-card h1 {
             color: #f4fff5 !important;
@@ -165,37 +180,45 @@ if not google_user.get("is_logged_in", False):
             font-size: .96rem;
             line-height: 1.65;
         }
-        .cg-login-features {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: .8rem;
-            margin: 1.5rem 0 1.75rem;
+        .cg-floating-prompt {
+            display: flex;
+            align-items: center;
+            gap: .85rem;
+            max-width: 620px;
+            margin: .5rem auto 1.5rem;
+            padding: 12px 24px;
+            border: 1px solid rgba(190, 225, 196, .2);
+            border-bottom: 2px solid #76FF03;
+            border-radius: 50px;
+            background: rgba(10, 25, 15, 0.6);
+            box-shadow: 0 15px 35px rgba(118, 255, 3, 0.15);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
             text-align: left;
+            animation: cg-float 4s ease-in-out infinite;
         }
-        .cg-login-feature {
-            min-height: 112px;
-            padding: 1rem;
-            border: 1px solid rgba(190, 225, 196, .16);
-            border-radius: 14px;
-            background: rgba(5, 18, 11, .42);
-            transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+        .cg-floating-prompt .prompt-icon {
+            flex: 0 0 auto;
+            color: #c7ff9f !important;
+            font-size: 1.2rem;
+            filter: drop-shadow(0 0 8px rgba(118, 255, 3, .7));
         }
-        .cg-login-feature:hover {
-            transform: translateY(-3px);
-            border-color: rgba(118, 255, 3, .38);
-            box-shadow: 0 10px 28px rgba(118, 255, 3, 0.25);
+        .cg-floating-prompt .prompt-text {
+            flex: 1 1 auto;
+            min-width: 0;
+            color: #d4e5d7 !important;
+            font-size: .95rem;
         }
-        .cg-login-feature strong {
-            display: block;
-            margin-bottom: .4rem;
-            color: #e4f6e7;
-            font-size: .96rem;
-        }
-        .cg-login-feature span {
-            display: block;
-            color: #b9cdbd;
+        .cg-floating-prompt .prompt-btn {
+            flex: 0 0 auto;
+            padding: .55rem .9rem;
+            border: 1px solid rgba(118, 255, 3, .3);
+            border-radius: 999px;
+            background: rgba(118, 255, 3, .12);
+            color: #c7ff9f !important;
             font-size: .84rem;
-            line-height: 1.45;
+            font-weight: 700;
+            white-space: nowrap;
         }
         .st-key-cg-google-login button {
             width: 100%;
@@ -275,11 +298,16 @@ if not google_user.get("is_logged_in", False):
                 padding: 1.5rem 1.1rem;
                 border-radius: 18px;
             }
-            .cg-login-features {
-                grid-template-columns: 1fr;
+            .cg-floating-prompt {
+                gap: .55rem;
+                padding: 10px 14px;
             }
-            .cg-login-feature {
-                min-height: auto;
+            .cg-floating-prompt .prompt-text {
+                font-size: .82rem;
+            }
+            .cg-floating-prompt .prompt-btn {
+                padding: .5rem .65rem;
+                font-size: .72rem;
             }
             .cg-impact-ticker {
                 align-items: flex-start;
@@ -289,6 +317,7 @@ if not google_user.get("is_logged_in", False):
         }
         @media (prefers-reduced-motion: reduce) {
             .cg-login-backdrop-slide,
+            .cg-floating-prompt,
             .cg-live-dot {
                 animation: none;
             }
@@ -296,7 +325,6 @@ if not google_user.get("is_logged_in", False):
                 opacity: 1;
                 transform: none;
             }
-            .cg-login-feature,
             .st-key-cg-google-login button {
                 transition: none;
             }
@@ -317,6 +345,10 @@ if not google_user.get("is_logged_in", False):
         unsafe_allow_html=True,
     )
     with st.container(key="cg-login-card"):
+        st.markdown(
+            '<div class="cg-coop-badge">🤝 A Farmer-Owned Digital Cooperative</div>',
+            unsafe_allow_html=True,
+        )
         st.markdown("# 🌱 CropGuard AI")
         st.markdown(
             '<p class="cg-login-subtitle">Scaling Innovations for Climate-Smart Food Systems.</p>'
@@ -326,26 +358,17 @@ if not google_user.get("is_logged_in", False):
         )
         st.markdown(
             """
-            <div class="cg-login-features">
-              <div class="cg-login-feature">
-                <strong>⚡ Instant Diagnostics</strong>
-                <span>AI-driven disease identification</span>
-              </div>
-              <div class="cg-login-feature">
-                <strong>👨‍🌾 Farmer-First</strong>
-                <span>Clear, jargon-free management plans</span>
-              </div>
-              <div class="cg-login-feature">
-                <strong>🏪 Agro-Vet Network</strong>
-                <span>Connect directly to local support &amp; cures</span>
-              </div>
+            <div class="cg-floating-prompt">
+              <span class="prompt-icon">✨</span>
+              <span class="prompt-text">Describe a crop issue or upload a leaf scan...</span>
+              <span class="prompt-btn">Ask the Cooperative ↵</span>
             </div>
             """,
             unsafe_allow_html=True,
         )
         st.markdown(
             '<p class="cg-login-subtitle" style="font-size:.95rem;margin-bottom:1rem">'
-            "Sign in securely with Google to continue</p>",
+            "Join the digital cooperative. Sign in to access your secure farm hub.</p>",
             unsafe_allow_html=True,
         )
         if _google_oidc_is_configured():
@@ -364,8 +387,8 @@ if not google_user.get("is_logged_in", False):
         st.markdown(
             '<div class="cg-impact-ticker" role="status">'
             '<span class="cg-live-dot" aria-hidden="true">🟢</span>'
-            '<span><strong>Live Network:</strong> 142 Active Micro-Climate Alerts · '
-            '5,403 Local Farmers Protected</span>'
+            '<span><strong>Live Cooperative:</strong> 5,403 Farmers Sharing Data · '
+            '142 Active Threats Mitigated</span>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -4433,6 +4456,23 @@ if app_mode == T["nav_acc"]:
                 f"**{T['user_id_lbl']}** "
                 f"`F{st.session_state['logged_in_user_id']:05d}`"
             )
+            st.markdown("---")
+            st.markdown("### 🛡️ Climate-Smart Resilience Score")
+            st.info(
+                "Illustrative hackathon score. Micro-insurance discounts are not "
+                "currently offered or guaranteed."
+            )
+
+            score = 720
+            score_col, tier_col = st.columns(2)
+            score_col.metric("Current Score", f"{score}/1000", "+15 this month")
+            tier_col.metric("Mock Insurance Tier", "Silver (10% Off)")
+
+            st.progress(score / 1000, text="720 - Excellent Climate Adaptation")
+            st.caption(
+                "Mock score factors: Early pest detection (30%), Organic treatment "
+                "adoption (40%), Community sharing (30%)."
+            )
 
     with col_acc2:
         with st.container(border=True):
@@ -4954,6 +4994,69 @@ else:
                             "disease_guide_unavailable",
                             "No exact crop-compatible knowledge-base match was found for this model class.",
                         ))
+
+                baseline_acre_value = {
+                    "Maize": 60000,
+                    "Irish potato": 90000,
+                    "Tomato": 120000,
+                    "Beans": 45000,
+                    "Coffee": 150000,
+                }
+                crop_base = next(
+                    (
+                        value
+                        for crop_name, value in baseline_acre_value.items()
+                        if crop_name.casefold() in chosen_crop.casefold()
+                    ),
+                    50000,
+                )
+                estimated_yield_loss_pct = severity_pct * 0.45
+                projected_loss_kes = (estimated_yield_loss_pct / 100) * crop_base
+                treatment_cost_kes = 1200
+
+                st.markdown("---")
+                st.markdown("### 💰 Financial Impact Analysis (1 Acre Estimate)")
+                st.caption(
+                    "Hackathon-only estimate using mock Kisii crop values and "
+                    "leaf discoloration as a rough proxy—not a yield forecast, "
+                    "treatment recommendation, or guaranteed return."
+                )
+                if is_healthy_prediction:
+                    st.success(
+                        "Crop appears healthy. Projected 1-Acre Yield Value: "
+                        f"**KES {crop_base:,.0f}**"
+                    )
+                else:
+                    st.info(
+                        "Calculated using AI leaf severity as a proxy for "
+                        "whole-field outbreak stage if left untreated."
+                    )
+                    col_f1, col_f2, col_f3 = st.columns(3)
+                    col_f1.metric(
+                        "Value at Risk",
+                        f"KES {projected_loss_kes:,.0f}",
+                        f"-{estimated_yield_loss_pct:.1f}% Yield",
+                        delta_color="inverse",
+                    )
+                    col_f2.metric(
+                        "Illustrative Treatment Cost",
+                        f"KES {treatment_cost_kes:,.0f}",
+                    )
+
+                    net_savings = projected_loss_kes - treatment_cost_kes
+                    if net_savings > 0:
+                        col_f3.metric(
+                            "Potential Net Difference",
+                            f"KES {net_savings:,.0f}",
+                            "Illustrative only",
+                        )
+                    else:
+                        col_f3.metric(
+                            "Potential Net Difference",
+                            "N/A",
+                            "Estimated damage does not exceed mock cost",
+                            delta_color="off",
+                        )
 
             with st.container(border=True):
                 st.markdown(f"### {T['hub_support_header']} ({selected_hub_label})")
