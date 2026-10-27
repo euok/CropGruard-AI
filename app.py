@@ -18,6 +18,7 @@ import hashlib
 import io
 import html
 from html import escape as html_escape
+from html.parser import HTMLParser
 import requests
 import re
 import disease_data as disease_guide_data
@@ -3209,6 +3210,18 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] {
     font-size: .6rem;
     animation-delay: -1.7s;
 }
+.cg-user-identity {
+    margin: 0 0 .65rem;
+    line-height: 1.5;
+}
+.cg-user-name {
+    display: block;
+    color: #203a2b !important;
+    font-weight: 700;
+}
+.cg-user-email {
+    color: #397bb8 !important;
+}
 .cg-climate-card {
     position: relative;
     overflow: hidden;
@@ -3308,8 +3321,13 @@ st.sidebar.markdown("""
     <span class="cg-brand-seed cg-brand-seed-two" aria-hidden="true">✧</span>
 </div>
 """, unsafe_allow_html=True)
-st.sidebar.caption(
-    f"{st.session_state['user_display_name']}\n{st.session_state['user_email']}"
+st.sidebar.markdown(
+    '<div class="cg-user-identity">'
+    f'<span class="cg-user-name">{html_escape(st.session_state["user_display_name"])}</span>'
+    f'<a class="cg-user-email" href="mailto:{html_escape(st.session_state["user_email"])}">'
+    f'{html_escape(st.session_state["user_email"])}</a>'
+    '</div>',
+    unsafe_allow_html=True,
 )
 if st.sidebar.button("Log out", key="google_oidc_logout", use_container_width=True):
     st.logout()
@@ -4393,48 +4411,260 @@ def view_map(ctx: types.SimpleNamespace) -> None:
     outbreak_map()
 
 
-def render_fair_market_board(hub_label):
-    st.markdown("### ⚖️ Kisii Fair Price Index")
-    st.info(
-        "Static Kisii demo reference prices—not live or independently verified. "
-        f"Selected hub: {hub_label}. Confirm current local prices before transacting."
+KAMIS_MARKET_URL = "https://kamis.kilimo.go.ke/site/market"
+KAMIS_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
+class _KamisMarketPageParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.products = []
+        self.tables = []
+        self._in_product_select = False
+        self._in_option = False
+        self._option_value = ""
+        self._option_text = ""
+        self._in_table = False
+        self._in_cell = False
+        self._cell_text = ""
+        self._row = []
+        self._table_rows = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "select":
+            self._in_product_select = attributes.get("id") == "selProduct"
+        elif tag == "option" and self._in_product_select:
+            self._in_option = True
+            self._option_value = attributes.get("value", "").strip()
+            self._option_text = ""
+        elif tag == "table":
+            self._in_table = True
+            self._table_rows = []
+        elif tag == "tr" and self._in_table:
+            self._row = []
+        elif tag in {"th", "td"} and self._in_table:
+            self._in_cell = True
+            self._cell_text = ""
+
+    def handle_data(self, data):
+        if self._in_option:
+            self._option_text += data
+        if self._in_cell:
+            self._cell_text += data
+
+    def handle_endtag(self, tag):
+        if tag == "option" and self._in_option:
+            label = " ".join(self._option_text.split())
+            if self._option_value and label:
+                self.products.append((self._option_value, label))
+            self._in_option = False
+        elif tag == "select":
+            self._in_product_select = False
+        elif tag in {"th", "td"} and self._in_cell:
+            self._row.append(" ".join(self._cell_text.split()))
+            self._in_cell = False
+        elif tag == "tr" and self._in_table:
+            if self._row:
+                self._table_rows.append(self._row)
+            self._row = []
+        elif tag == "table" and self._in_table:
+            self.tables.append(self._table_rows)
+            self._in_table = False
+
+
+def _parse_kamis_market_page(page_html):
+    parser = _KamisMarketPageParser()
+    parser.feed(page_html)
+
+    table_rows = next(
+        (
+            rows
+            for rows in parser.tables
+            if rows
+            and rows[0]
+            and rows[0][0].casefold() == "commodity"
+            and "date" in {column.casefold() for column in rows[0]}
+        ),
+        None,
+    )
+    if not parser.products:
+        raise RuntimeError("KAMIS did not provide its commodity list.")
+    if table_rows is None or len(table_rows) < 2:
+        raise RuntimeError("KAMIS did not provide any market price records.")
+
+    columns = table_rows[0]
+    records = [
+        row for row in table_rows[1:]
+        if len(row) == len(columns)
+    ]
+    if not records:
+        raise RuntimeError("KAMIS market price records were not in the expected format.")
+
+    return parser.products, pd.DataFrame(records, columns=columns)
+
+
+@st.cache_data(ttl=KAMIS_CACHE_TTL_SECONDS, show_spinner=False)
+def _fetch_kamis_market_page(product_id=None, per_page=3000):
+    params = {"per_page": str(per_page)}
+    if product_id is not None:
+        params["product"] = str(product_id)
+
+    response = requests.get(
+        KAMIS_MARKET_URL,
+        params=params,
+        timeout=(5, 25),
+        headers={"User-Agent": "CropGuardAI market viewer"},
+    )
+    response.raise_for_status()
+    products, records = _parse_kamis_market_page(response.text)
+    return products, records, datetime.now()
+
+
+def _parse_kamis_numeric_values(values):
+    numeric = values.astype(str).str.replace(",", "", regex=False).str.extract(
+        r"(-?\d+(?:\.\d+)?)",
+        expand=False,
+    )
+    return pd.to_numeric(numeric, errors="coerce")
+
+
+def render_fair_market_board():
+    st.markdown("### ⚖️ Kenya Agricultural Market Prices")
+    st.caption(
+        "Official market observations from the Kenya Agricultural Market Information "
+        "System (KAMIS), Ministry of Agriculture. Data is cached for up to seven days "
+        "per commodity; you can request an immediate refresh."
     )
 
-    market_data = {
-        "Commodity / Input": [
-            "Maize (90kg Bag)",
-            "Irish Potatoes (50kg)",
-            "DAP Fertilizer (50kg)",
-            "Certified Maize Seed (2kg)",
-        ],
-        "Demo Reference Price (KES)": [
-            "3,200 - 3,500",
-            "2,800 - 3,100",
-            "4,500 - 4,800",
-            "500 - 650",
-        ],
-        "Broker Alert Level": [
-            "🔴 High Risk",
-            "🟡 Moderate Risk",
-            "🟢 Stable",
-            "🟢 Subsidized",
-        ],
-        "Trend": ["📈 Rising", "📉 Falling", "➖ Stable", "➖ Stable"],
-    }
-    df_market = pd.DataFrame(market_data)
+    try:
+        products, _, _ = _fetch_kamis_market_page(per_page=10)
+    except (requests.RequestException, RuntimeError) as error:
+        st.error(f"Could not load official market data from KAMIS: {error}")
+        st.markdown(f"[Open the official KAMIS market listings]({KAMIS_MARKET_URL})")
+        return
 
+    product_col, refresh_col = st.columns([3, 1], vertical_alignment="bottom")
+    with product_col:
+        selected_product = st.selectbox(
+            "Commodity",
+            options=products,
+            format_func=lambda product: product[1],
+            key="kamis_market_product",
+        )
+    with refresh_col:
+        if st.button(
+            "Refresh prices",
+            key=f"kamis_market_refresh_{selected_product[0]}",
+            use_container_width=True,
+        ):
+            _fetch_kamis_market_page.clear(selected_product[0], 3000)
+            st.rerun()
+
+    try:
+        _, records, fetched_at = _fetch_kamis_market_page(
+            selected_product[0],
+            3000,
+        )
+    except (requests.RequestException, RuntimeError) as error:
+        st.error(f"Could not load official market data from KAMIS: {error}")
+        st.markdown(f"[Open the official KAMIS market listings]({KAMIS_MARKET_URL})")
+        return
+
+    county_column = next(
+        (column for column in records.columns if column.casefold() == "county"),
+        None,
+    )
+    market_column = next(
+        (column for column in records.columns if column.casefold() == "market"),
+        None,
+    )
+    date_column = next(
+        (column for column in records.columns if column.casefold() == "date"),
+        None,
+    )
+    if not county_column or not market_column or not date_column:
+        st.error("KAMIS returned records without the expected county, market, or date fields.")
+        st.markdown(f"[Open the official KAMIS market listings]({KAMIS_MARKET_URL})")
+        return
+
+    records[date_column] = pd.to_datetime(records[date_column], errors="coerce")
+    records = records.dropna(subset=[date_column])
+    if records.empty:
+        st.warning("KAMIS did not return any dated price observations for this commodity.")
+        st.markdown(f"[Open the official KAMIS market listings]({KAMIS_MARKET_URL})")
+        return
+
+    county_col, _ = st.columns([1, 2])
+    with county_col:
+        selected_county = st.selectbox(
+            "County",
+            options=["All counties"] + sorted(records[county_column].dropna().unique()),
+            key=f"kamis_market_county_{selected_product[0]}",
+        )
+
+    if selected_county != "All counties":
+        records = records[records[county_column] == selected_county]
+
+    variant_columns = [
+        column for column in ("Commodity", "Classification", "Grade", "Sex", market_column, county_column)
+        if column in records.columns
+    ]
+    records = (
+        records.sort_values(date_column, ascending=False)
+        .drop_duplicates(subset=variant_columns, keep="first")
+        .copy()
+    )
+
+    display_columns = {}
+    for column, label in (
+        ("Commodity", "Commodity"),
+        ("Classification", "Classification"),
+        ("Grade", "Grade"),
+        ("Sex", "Type"),
+        (market_column, "Market"),
+        (county_column, "County"),
+        ("Wholesale", "Wholesale price (KES/kg)"),
+        ("Retail", "Retail price (KES/kg)"),
+        ("Supply Volume", "Supply volume (kg)"),
+        (date_column, "Report date"),
+    ):
+        if column in records.columns:
+            display_columns[column] = label
+
+    for column in ("Wholesale", "Retail", "Supply Volume"):
+        if column in records.columns:
+            records[column] = _parse_kamis_numeric_values(records[column])
+    records[date_column] = records[date_column].dt.strftime("%Y-%m-%d")
+    records = records.sort_values(date_column, ascending=False)
+
+    latest_report_date = pd.to_datetime(records[date_column]).max().date()
+    age_days = (datetime.now().date() - latest_report_date).days
+    st.markdown(
+        f"**{len(records):,} market observations** · Latest report: "
+        f"**{latest_report_date.isoformat()}** · Last fetched: "
+        f"**{fetched_at.strftime('%Y-%m-%d %H:%M')}**"
+    )
+    if age_days > 7:
+        st.warning(
+            f"The latest KAMIS report for this selection is {age_days} days old. "
+            "Prices may no longer reflect current market conditions."
+        )
     st.dataframe(
-        df_market,
+        records[list(display_columns)].rename(columns=display_columns),
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Broker Alert Level": st.column_config.TextColumn(
-                "Broker Alert Level",
-                help="Based on recent farmer reports of price manipulation.",
-            )
+            "Wholesale price (KES/kg)": st.column_config.NumberColumn(format="%.2f"),
+            "Retail price (KES/kg)": st.column_config.NumberColumn(format="%.2f"),
+            "Supply volume (kg)": st.column_config.NumberColumn(format="%.2f"),
         },
     )
-    st.caption("Report predatory pricing to the Ministry Hotline via the Community Feed.")
+    st.caption(
+        "Prices are reported per kilogram by KAMIS and may vary by market, grade, "
+        "and reporting date. Values are observations, not guaranteed transaction offers. "
+        f"[View KAMIS source]({KAMIS_MARKET_URL})"
+    )
 
 
 # ==========================================
@@ -4448,30 +4678,112 @@ if app_mode == T["nav_acc"]:
     col_acc1, col_acc2 = st.columns([1, 1.6], gap="large")
 
     with col_acc1:
-        with st.container(border=True):
+        st.markdown(
+            """
+            <style>
+            .st-key-cg-account-profile [data-testid="stMarkdownContainer"] .cg-account-value,
+            .st-key-cg-account-profile [data-testid="stMarkdownContainer"] .cg-account-value * {
+                color: #102719 !important;
+                -webkit-text-fill-color: #102719 !important;
+                opacity: 1 !important;
+                text-shadow: none !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.container(key="cg-account-profile", border=True):
             st.markdown(f"### {T['profile_header']}")
             st.success(f"{T['auth_success']} {st.session_state['user_display_name']}!")
-            st.write(f"**{T['email_lbl']}** `{st.session_state['user_email']}`")
-            st.write(
-                f"**{T['user_id_lbl']}** "
-                f"`F{st.session_state['logged_in_user_id']:05d}`"
+            st.markdown(
+                f"<p><strong>{html_escape(T['email_lbl'])}</strong> "
+                f"<span class='cg-account-value' style='display:inline-block;"
+                f"padding:.15rem .4rem;border-radius:.3rem;background:#e1eadf;"
+                f"font-weight:700;'>"
+                f"{html_escape(st.session_state['user_email'])}</span></p>"
+                f"<p><strong>{html_escape(T['user_id_lbl'])}</strong> "
+                f"<span class='cg-account-value' style='display:inline-block;"
+                f"padding:.15rem .4rem;border-radius:.3rem;background:#e1eadf;"
+                f"font-weight:700;'>"
+                f"F{st.session_state['logged_in_user_id']:05d}</span></p>",
+                unsafe_allow_html=True,
             )
             st.markdown("---")
             st.markdown("### 🛡️ Climate-Smart Resilience Score")
-            st.info(
-                "Illustrative hackathon score. Micro-insurance discounts are not "
-                "currently offered or guaranteed."
-            )
-
             score = 720
-            score_col, tier_col = st.columns(2)
-            score_col.metric("Current Score", f"{score}/1000", "+15 this month")
-            tier_col.metric("Mock Insurance Tier", "Silver (10% Off)")
-
-            st.progress(score / 1000, text="720 - Excellent Climate Adaptation")
-            st.caption(
-                "Mock score factors: Early pest detection (30%), Organic treatment "
-                "adoption (40%), Community sharing (30%)."
+            score_pct = score / 1000 * 100
+            st.markdown(
+                f"""
+                <div style="padding:1.15rem;border:1px solid rgba(148, 212, 159, .35);
+                    border-radius:16px;background:linear-gradient(145deg,#102b1d,#183a28);
+                    color:#fff;">
+                  <div style="display:flex;justify-content:space-between;align-items:flex-start;
+                      gap:.75rem;flex-wrap:wrap;">
+                    <div>
+                      <div style="color:#d8eadb !important;-webkit-text-fill-color:#d8eadb !important;
+                          font-size:.9rem;font-weight:650;">Illustrative resilience score</div>
+                      <div style="margin-top:.15rem;color:#fff !important;
+                          -webkit-text-fill-color:#fff !important;font-size:2rem;font-weight:800;
+                          line-height:1.2;">{score}<span style="color:#c3d8c8 !important;
+                          -webkit-text-fill-color:#c3d8c8 !important;font-size:1rem;
+                          font-weight:600;"> / 1,000</span></div>
+                    </div>
+                    <span style="padding:.35rem .65rem;border:1px solid rgba(166,230,150,.45);
+                        border-radius:999px;background:rgba(118,255,3,.12);color:#d6ffbf !important;
+                        -webkit-text-fill-color:#d6ffbf !important;font-size:.8rem;font-weight:700;">
+                      Example tier: Silver
+                    </span>
+                  </div>
+                  <div role="progressbar" aria-label="Illustrative climate resilience score"
+                      aria-valuemin="0" aria-valuemax="1000" aria-valuenow="{score}"
+                      style="height:12px;margin:1rem 0 .45rem;overflow:hidden;border-radius:999px;
+                          background:#34463a;">
+                    <div style="width:{score_pct}%;height:100%;border-radius:999px;
+                        background:linear-gradient(90deg,#76ff03,#b7f28a);"></div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;gap:.5rem;
+                      color:#e4f0e5 !important;-webkit-text-fill-color:#e4f0e5 !important;
+                      font-size:.85rem;">
+                    <span>72% of the demo scale</span>
+                    <strong style="color:#d6ffbf !important;
+                        -webkit-text-fill-color:#d6ffbf !important;">Excellent climate adaptation</strong>
+                  </div>
+                  <div style="margin-top:1.1rem;color:#fff !important;
+                      -webkit-text-fill-color:#fff !important;font-size:.88rem;font-weight:700;">
+                    What contributes to the score
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+                      gap:.55rem;margin-top:.55rem;">
+                    <div style="padding:.65rem .5rem;border-radius:10px;background:rgba(255,255,255,.09);
+                        text-align:center;color:#edf6ee !important;
+                        -webkit-text-fill-color:#edf6ee !important;font-size:.78rem;">
+                      Early pest detection<strong style="display:block;margin-top:.25rem;
+                          color:#d6ffbf !important;-webkit-text-fill-color:#d6ffbf !important;
+                          font-size:1rem;">30%</strong>
+                    </div>
+                    <div style="padding:.65rem .5rem;border-radius:10px;background:rgba(255,255,255,.09);
+                        text-align:center;color:#edf6ee !important;
+                        -webkit-text-fill-color:#edf6ee !important;font-size:.78rem;">
+                      Organic treatment adoption<strong style="display:block;margin-top:.25rem;
+                          color:#d6ffbf !important;-webkit-text-fill-color:#d6ffbf !important;
+                          font-size:1rem;">40%</strong>
+                    </div>
+                    <div style="padding:.65rem .5rem;border-radius:10px;background:rgba(255,255,255,.09);
+                        text-align:center;color:#edf6ee !important;
+                        -webkit-text-fill-color:#edf6ee !important;font-size:.78rem;">
+                      Community sharing<strong style="display:block;margin-top:.25rem;
+                          color:#d6ffbf !important;-webkit-text-fill-color:#d6ffbf !important;
+                          font-size:1rem;">30%</strong>
+                    </div>
+                  </div>
+                  <div style="margin-top:.85rem;color:#d8eadb !important;
+                      -webkit-text-fill-color:#d8eadb !important;font-size:.78rem;line-height:1.5;">
+                    Demo estimate only. The score and Silver tier are illustrative; insurance
+                    discounts are not currently offered or guaranteed.
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
     with col_acc2:
@@ -4594,7 +4906,10 @@ elif app_mode == T["nav_forum"]:
 
     with col_post:
         with st.container(border=True):
-            st.markdown(f"### {T['broadcast_header']}")
+            st.markdown(
+                "<h4 style='color: #a5f28a; margin-bottom: 0;'>✍️ Create a Post</h4>",
+                unsafe_allow_html=True,
+            )
             tag = st.selectbox(T["tag_label"], ["🚨 Outbreak Alert", "🌾 Crop Advice", "🚜 Equipment & Inputs", "🛒 Marketplace / Trade"])
             message_text = st.text_area(T["msg_label"], height=120)
             forum_media = st.file_uploader(
@@ -4661,47 +4976,143 @@ elif app_mode == T["nav_forum"]:
                     st.warning(T["forum_post_empty"])
 
     with col_feed:
-        with st.expander("📊 View Kisii Fair Market Prices", expanded=True):
-            render_fair_market_board(
-                st.session_state.get(
-                    "selected_hub_label",
-                    "Kisii, Kenya (Highland Zone)",
-                )
-            )
+        st.markdown(
+            """
+            <style>
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button,
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button:hover,
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button:focus,
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button:active,
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button:disabled {
+                color: #111 !important;
+                -webkit-text-fill-color: #111 !important;
+                background: #fff !important;
+                opacity: 1 !important;
+                text-shadow: none !important;
+            }
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button *,
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button:hover *,
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button:focus *,
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button:active *,
+            [data-testid="stMain"] .st-key-cg-market-prices .stButton > button:disabled * {
+                color: #111 !important;
+                -webkit-text-fill-color: #111 !important;
+                text-shadow: none !important;
+            }
+            [data-testid="stMain"] [class*="st-key-cg-forum-post-"] {
+                transition: transform .2s ease;
+            }
+            [data-testid="stMain"] [class*="st-key-cg-forum-post-"]:hover {
+                transform: translateY(-2px);
+            }
+            .cg-forum-topic-tag {
+                display: inline-block;
+                padding: .2rem .6rem;
+                border-radius: 999px;
+                font-size: .8rem;
+                font-weight: 750;
+                line-height: 1.4;
+            }
+            @media (prefers-reduced-motion: reduce) {
+                [data-testid="stMain"] [class*="st-key-cg-forum-post-"] {
+                    transition: none;
+                }
+                [data-testid="stMain"] [class*="st-key-cg-forum-post-"]:hover {
+                    transform: none;
+                }
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
-        st.markdown(f"### {T['feed_header']} ({selected_hub_label})")
-        
-        conn = _epi_conn()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT author_name, category_tag, message, timestamp,
-                   media_name, media_type, media_data
-            FROM farmer_community_posts 
-            WHERE hub_region = ? 
-            ORDER BY post_id DESC
-        ''', (selected_hub_label,))
-        posts = cursor.fetchall()
-        conn.close()
+        feed_tab, market_tab = st.tabs(
+            ["📰 Live Community Feed", "📊 Fair Market Prices"]
+        )
+        with market_tab:
+            with st.container(key="cg-market-prices"):
+                render_fair_market_board()
 
-        if not posts:
-            st.info(T["no_posts_msg"].format(hub=selected_hub_label))
-        else:
-            for p_author, p_tag, p_msg, p_ts, media_name, media_type, media_data in posts:
-                with st.container(border=True):
-                    st.markdown(
-                        f"**{html.escape(p_author)}** `{html.escape(p_tag)}` &nbsp;•&nbsp; "
-                        f"<span style='font-size: 0.85rem; color: #A5D6A7;'>"
-                        f"{html.escape(p_ts)}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    if p_msg:
-                        st.write(p_msg)
-                    if media_data:
-                        if media_type == "image":
-                            st.image(media_data, caption=media_name, use_container_width=True)
-                        elif media_type == "video":
-                            st.video(media_data)
-                            st.caption(f"{T['forum_media_name']}: {media_name}")
+        with feed_tab:
+            st.markdown(f"### {T['feed_header']} ({selected_hub_label})")
+            conn = _epi_conn()
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT author_name, category_tag, message, timestamp,
+                       media_name, media_type, media_data
+                FROM farmer_community_posts
+                WHERE hub_region = ?
+                ORDER BY post_id DESC
+            ''', (selected_hub_label,))
+            posts = cursor.fetchall()
+            conn.close()
+
+            if not posts:
+                st.info(T["no_posts_msg"].format(hub=selected_hub_label))
+            else:
+                for post_index, (
+                    p_author, p_tag, p_msg, p_ts, media_name, media_type, media_data
+                ) in enumerate(posts):
+                    tag_text = str(p_tag)
+                    if "Alert" in tag_text:
+                        tag_background, tag_border, tag_color = (
+                            "rgba(239, 68, 68, 0.15)",
+                            "#ef4444",
+                            "#fca5a5",
+                        )
+                    elif "Advice" in tag_text:
+                        tag_background, tag_border, tag_color = (
+                            "rgba(34, 197, 94, 0.15)",
+                            "#22c55e",
+                            "#86efac",
+                        )
+                    else:
+                        tag_background, tag_border, tag_color = (
+                            "rgba(59, 130, 246, 0.15)",
+                            "#3b82f6",
+                            "#93c5fd",
+                        )
+                    with st.container(
+                        key=f"cg-forum-post-{post_index}",
+                        border=True,
+                    ):
+                        st.markdown(
+                            f"""
+                            <div style="display:flex;align-items:center;justify-content:space-between;
+                                flex-wrap:wrap;gap:.65rem .9rem;">
+                              <div style="display:flex;align-items:center;min-width:0;">
+                                <span style="font-size:1.2rem;margin-right:8px;">🧑‍🌾</span>
+                                <strong>{html.escape(str(p_author))}</strong>
+                              </div>
+                              <div style="display:flex;align-items:center;justify-content:flex-end;
+                                  flex-wrap:wrap;gap:.55rem;">
+                                <span class="cg-forum-topic-tag" style="display:inline-block;
+                                    padding:.2rem .6rem;border:1px solid {tag_border};
+                                    border-radius:999px;background:{tag_background};
+                                    color:{tag_color} !important;
+                                    -webkit-text-fill-color:{tag_color} !important;
+                                    font-size:.8rem;font-weight:750;line-height:1.4;
+                                    text-shadow:none !important;">
+                                  {html.escape(tag_text)}
+                                </span>
+                                <span style="font-size:.82rem;color:#cbd5e1 !important;
+                                    -webkit-text-fill-color:#cbd5e1 !important;
+                                    text-shadow:none !important;">
+                                  {html.escape(str(p_ts))}
+                                </span>
+                              </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        if p_msg:
+                            st.write(p_msg)
+                        if media_data:
+                            if media_type == "image":
+                                st.image(media_data, caption=media_name, use_container_width=True)
+                            elif media_type == "video":
+                                st.video(media_data)
+                                st.caption(f"{T['forum_media_name']}: {media_name}")
 
 # ==========================================
 # VIEW 2: FARMER DIAGNOSTIC & ADVISORY HUB (DEFAULT)
